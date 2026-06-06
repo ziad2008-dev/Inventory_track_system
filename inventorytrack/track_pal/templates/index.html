@@ -1,0 +1,126 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Dashboard</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker" id="greeting-kicker">Overview</div>
+        <h1 class="page-title" id="greeting-title">Operations Dashboard</h1>
+        <p class="page-desc" id="greeting-desc">Live snapshot of inventory health across your company.</p>
+      </div>
+      <a href="/stock-ui/" class="btn btn-primary" data-reveal style="animation-delay:.05s">
+        <span id="cta-icon"></span> Manage Stock
+      </a>
+    </div>
+
+    <div id="banners"></div>
+
+    <div class="stat-grid" id="stats"></div>
+
+    <div class="panel" data-reveal style="animation-delay:.2s">
+      <div class="panel-head">
+        <h2>Stock Requiring Attention</h2>
+        <span class="badge b-warn" id="alert-count">—</span>
+      </div>
+      <div id="alerts"><div class="skeleton">Loading inventory…</div></div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+(async function initDashboard() {
+    if (!UI.requireAuth()) return;
+  try {
+    const [warehouses, products, stocks] = await Promise.all([
+      api.warehouses(), api.products(), api.stocks()
+    ]);
+
+    const me = await UI.mountShell("dash");
+    document.getElementById("cta-icon").innerHTML = UI.ICONS.stock;
+
+    // personalized greeting
+    if (me) {
+      const first = me.first_name || (me.name || "").split(" ")[0] || me.username;
+      document.getElementById("greeting-kicker").textContent = me.company || "Overview";
+      document.getElementById("greeting-title").textContent = UI.greeting(first);
+      document.getElementById("greeting-desc").textContent =
+        "Here's the latest on your inventory across every warehouse.";
+    }
+
+    // banners (critical / low / expired / expiring)
+    document.getElementById("banners").innerHTML = UI.buildBanners(stocks);
+
+    const totalUnits = stocks.reduce((a, s) => a + s.quantity, 0);
+    const grandValue = stocks.reduce((a, s) => a + (s.line_value || 0), 0);
+    const critical = stocks.filter(s => s.alert_status === "critical").length;
+    const low      = stocks.filter(s => s.alert_status === "low").length;
+
+    document.getElementById("stats").innerHTML = `
+      <div class="stat" data-reveal style="animation-delay:.08s">
+        <div class="stat-label">Warehouses</div>
+        <div class="stat-value">${warehouses.length}</div>
+        <div class="stat-foot">${UI.ICONS.warehouse} ${products.length} products tracked</div>
+      </div>
+      <div class="stat" data-reveal style="animation-delay:.12s">
+        <div class="stat-label">Total Units On Hand</div>
+        <div class="stat-value teal">${totalUnits.toLocaleString()}</div>
+        <div class="stat-foot">${UI.ICONS.box} ${stocks.length} stock records</div>
+      </div>
+      <div class="stat" data-reveal style="animation-delay:.16s">
+        <div class="stat-label">Total Stock Value</div>
+        <div class="stat-value amber">${grandValue ? grandValue.toLocaleString(undefined,{maximumFractionDigits:0}) : "—"}</div>
+        <div class="stat-foot">${UI.ICONS.trend} company-wide</div>
+      </div>
+      <div class="stat" data-reveal style="animation-delay:.2s">
+        <div class="stat-label">Alerts</div>
+        <div class="stat-value ${critical ? 'red' : ''}">${critical + low}</div>
+        <div class="stat-foot">${UI.ICONS.alert} ${critical} critical · ${low} low</div>
+      </div>`;
+
+    // attention table: anything not healthy, or expired/expiring
+    const flagged = stocks.filter(s =>
+      s.alert_status !== "healthy" || s.expiry_status === "expired" || s.expiry_status === "expiring_soon"
+    );
+    document.getElementById("alert-count").textContent = flagged.length + " items";
+
+    if (!flagged.length) {
+      document.getElementById("alerts").innerHTML = `<div class="empty">All stock levels are healthy. 🎉</div>`;
+      return;
+    }
+    const rank = s => s.alert_status === "critical" || s.expiry_status === "expired" ? 0 : 1;
+    flagged.sort((a, b) => rank(a) - rank(b));
+    document.getElementById("alerts").innerHTML = `
+      <table><thead><tr>
+        <th>Product</th><th>SKU</th><th>Warehouse</th><th>On Hand</th><th>Status</th><th>Expiry</th>
+      </tr></thead><tbody>
+      ${flagged.map(s => `
+        <tr>
+          <td><span class="strong">${s.product_name}</span></td>
+          <td class="mono">${s.product_sku || '—'}</td>
+          <td>${s.warehouse_name}</td>
+          <td><span class="strong">${s.quantity.toLocaleString()}</span> ${s.product_unit || ''}</td>
+          <td>${UI.alertChip(s.alert_status)}</td>
+          <td>${UI.expiryChip(s.expiry_status, s.days_to_expiry)}</td>
+        </tr>`).join("")}
+      </tbody></table>`;
+
+  } catch (error) {
+    console.error("Dashboard failed to load:", error);
+    document.getElementById("alerts").innerHTML = `<div class="empty">Couldn't load data. Check the console.</div>`;
+  }
+})();
+</script>
+</body>
+</html>

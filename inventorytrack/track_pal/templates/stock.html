@@ -1,0 +1,136 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Stock Levels</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+<style>
+  .qty-edit { width: 92px; background: var(--bg-grad-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; color: var(--ink); font-family: var(--mono); font-size: 13px; }
+  .qty-edit:focus { outline: none; border-color: var(--amber); }
+  .save-pill { font-size: 11px; color: var(--green); opacity: 0; transition: .3s; margin-left: 8px; }
+  .save-pill.show { opacity: 1; }
+</style>
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Live Inventory</div>
+        <h1 class="page-title">Stock Levels</h1>
+        <p class="page-desc">Quantity on hand per warehouse. Edit a value to update it instantly.</p>
+      </div>
+    </div>
+
+    <div id="banners"></div>
+
+    <div class="stat-grid" id="stats" style="grid-template-columns:repeat(3,1fr)"></div>
+
+    <div class="panel" data-reveal style="animation-delay:.1s">
+      <div class="panel-head">
+        <h2>Stock Records</h2>
+        <div class="panel-tools">
+          <input class="search" id="search" placeholder="Search product or SKU…" oninput="apply()">
+          <select class="search" id="wh-filter" onchange="apply()" style="min-width:180px"><option value="">All warehouses</option></select>
+          <select class="search" id="status-filter" onchange="apply()" style="min-width:140px">
+            <option value="">All status</option>
+            <option value="critical">Critical</option>
+            <option value="low">Low</option>
+            <option value="healthy">Healthy</option>
+          </select>
+        </div>
+      </div>
+      <div id="table"><div class="skeleton">Loading stock…</div></div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _rows = [];
+async function load() {
+  if (!UI.requireAuth()) return;
+  try {
+    const [stocks, warehouses] = await Promise.all([api.stocks(), api.warehouses()]);
+    _rows = stocks;
+    await UI.mountShell("stock");
+    document.getElementById("wh-filter").innerHTML =
+      '<option value="">All warehouses</option>' + warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join("");
+    document.getElementById("banners").innerHTML = UI.buildBanners(_rows);
+    renderStats();
+    apply();
+  } catch (err) {
+    console.error(err);
+    document.getElementById("table").innerHTML = `<div class="empty">Couldn't load stock. Check the console.</div>`;
+  }
+}
+function renderStats() {
+  let crit=0, low=0, healthy=0;
+  _rows.forEach(s => {
+    if (s.alert_status === "critical") crit++;
+    else if (s.alert_status === "low") low++;
+    else healthy++;
+  });
+  document.getElementById("stats").innerHTML = `
+    <div class="stat" data-reveal style="animation-delay:.05s"><div class="stat-label">Healthy</div><div class="stat-value teal">${healthy}</div><div class="stat-foot">above alert level</div></div>
+    <div class="stat" data-reveal style="animation-delay:.1s"><div class="stat-label">Low Stock</div><div class="stat-value amber">${low}</div><div class="stat-foot">approaching minimum</div></div>
+    <div class="stat" data-reveal style="animation-delay:.15s"><div class="stat-label">Critical</div><div class="stat-value ${crit?'red':''}">${crit}</div><div class="stat-foot">at or below minimum</div></div>`;
+}
+function apply() {
+  const q=(document.getElementById("search").value||"").toLowerCase();
+  const wf=document.getElementById("wh-filter").value;
+  const sf=document.getElementById("status-filter").value;
+  const rows=_rows.filter(s=>
+    (!wf || s.warehouse == +wf) &&
+    (!sf || s.alert_status === sf) &&
+    ((s.product_name||"").toLowerCase().includes(q) || (s.product_sku||"").toLowerCase().includes(q))
+  );
+  const el=document.getElementById("table");
+  if(!rows.length){ el.innerHTML=`<div class="empty">No stock records match your filters.</div>`; return; }
+  el.innerHTML=`
+    <table><thead><tr>
+      <th>Product</th><th>SKU</th><th>Warehouse</th><th>On Hand</th><th>Status</th><th>Expiry</th><th>Line Value</th><th>Updated</th>
+    </tr></thead><tbody>
+    ${rows.map(s=>`
+      <tr>
+        <td><span class="strong">${s.product_name}</span></td>
+        <td class="mono">${s.product_sku||"—"}</td>
+        <td>${s.warehouse_name}</td>
+        <td><input class="qty-edit" type="number" min="0" value="${s.quantity}" onchange="updateQty(${s.id}, this)"> ${s.product_unit||""}<span class="save-pill" id="pill-${s.id}">saved ✓</span></td>
+        <td>${UI.alertChip(s.alert_status)}</td>
+        <td>${UI.expiryChip(s.expiry_status, s.days_to_expiry)}</td>
+        <td>${UI.fmtMoney(s.line_value)}</td>
+        <td>${UI.fmtDate(s.last_updated)}</td>
+      </tr>`).join("")}
+    </tbody></table>`;
+}
+async function updateQty(id, input) {
+  const qty=Math.max(0, parseInt(input.value)||0);
+  try {
+    const updated = await api.updateStock(id, qty);
+    const rec=_rows.find(s=>s.id===id);
+    if(rec){
+      rec.quantity = qty;
+      // refresh derived fields from the server response
+      if (updated) { rec.alert_status = updated.alert_status; rec.line_value = updated.line_value; rec.last_updated = updated.last_updated; }
+    }
+    const pill=document.getElementById("pill-"+id);
+    if(pill){ pill.classList.add("show"); setTimeout(()=>pill.classList.remove("show"),1500); }
+    document.getElementById("banners").innerHTML = UI.buildBanners(_rows);
+    renderStats();
+    apply();
+  } catch (error) {
+    console.error(error);
+    const msg=(error.message||"").split(/API \d+:\s*/).pop();
+    alert("Couldn't update quantity.\n\n"+msg);
+  }
+}
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Warehouse</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <a class="back-link" href="/"><span id="back-icon"></span> All warehouses</a>
+
+    <div class="detail-head">
+      <div data-reveal>
+        <div class="page-kicker" id="wh-type">Warehouse</div>
+        <h1 class="page-title" id="wh-name">Loading…</h1>
+        <p class="page-desc" id="wh-loc"></p>
+      </div>
+      <div class="detail-value-card" data-reveal style="animation-delay:.05s">
+        <div class="k">Total stock value</div>
+        <div class="money-big" id="wh-value">—</div>
+      </div>
+    </div>
+
+    <div id="banners"></div>
+
+    <div class="panel" data-reveal style="animation-delay:.15s">
+      <div class="panel-head">
+        <h2>Products in this Warehouse</h2>
+        <div class="panel-tools">
+          <input class="search" id="search" placeholder="Search product or SKU…" oninput="apply()">
+        </div>
+      </div>
+      <div id="table"><div class="skeleton">Loading products…</div></div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+// pull the warehouse id out of the URL: /warehouse/<id>/
+const WH_ID = parseInt(window.location.pathname.split("/").filter(Boolean)[1]);
+let _rows = [];
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  await UI.mountShell("warehouse");
+  document.getElementById("back-icon").innerHTML = UI.ICONS.back;
+
+  try {
+    const [warehouses, stocks] = await Promise.all([
+      api.warehouses(),
+      api.stocksByWarehouse(WH_ID)
+    ]);
+
+    const wh = warehouses.find(w => w.id === WH_ID);
+    if (!wh) {
+      document.getElementById("wh-name").textContent = "Warehouse not found";
+      document.getElementById("table").innerHTML = `<div class="empty">This warehouse doesn't exist.</div>`;
+      return;
+    }
+
+    document.getElementById("wh-type").innerHTML = UI.badgeFor(wh.type);
+    document.getElementById("wh-name").textContent = wh.name;
+    document.getElementById("wh-loc").innerHTML = `${UI.ICONS.pin} ${wh.location}`;
+
+    _rows = stocks;
+
+    // total value of this warehouse
+    const total = _rows.reduce((a, s) => a + (s.line_value || 0), 0);
+    document.getElementById("wh-value").innerHTML = total
+      ? total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : "—";
+
+    // alert + expiry banners for this warehouse
+    document.getElementById("banners").innerHTML = UI.buildBanners(_rows);
+
+    apply();
+  } catch (err) {
+    console.error(err);
+    document.getElementById("table").innerHTML = `<div class="empty">Couldn't load this warehouse. Check the console.</div>`;
+  }
+}
+
+function apply() {
+  const q = (document.getElementById("search").value || "").toLowerCase();
+  const rows = _rows.filter(s =>
+    (s.product_name || "").toLowerCase().includes(q) ||
+    (s.product_sku || "").toLowerCase().includes(q)
+  );
+  const el = document.getElementById("table");
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty">No products in this warehouse yet.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <table><thead><tr>
+      <th>Product</th><th>SKU</th><th>On Hand</th><th>Status</th><th>Expiry</th><th>Line Value</th>
+    </tr></thead><tbody>
+    ${rows.map(s => `
+      <tr>
+        <td><span class="strong">${s.product_name}</span></td>
+        <td class="mono">${s.product_sku || "—"}</td>
+        <td><span class="strong">${s.quantity.toLocaleString()}</span> ${s.product_unit || ""}</td>
+        <td>${UI.alertChip(s.alert_status)}</td>
+        <td>${UI.expiryChip(s.expiry_status, s.days_to_expiry)}</td>
+        <td>${UI.fmtMoney(s.line_value)}</td>
+      </tr>`).join("")}
+    </tbody></table>`;
+}
+
+load();
+</script>
+</body>
+</html>

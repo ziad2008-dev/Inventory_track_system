@@ -1,0 +1,295 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Products</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Catalogue</div>
+        <h1 class="page-title">Products</h1>
+        <p class="page-desc">Master list of every SKU tracked across your warehouses.</p>
+      </div>
+      <button class="btn btn-primary" data-reveal style="animation-delay:.05s" onclick="openCreate()">
+        <span id="add-icon"></span> New Product
+      </button>
+    </div>
+
+    <div class="panel" data-reveal style="animation-delay:.1s">
+      <div class="panel-head">
+        <h2>Product Catalogue</h2>
+        <div class="panel-tools">
+          <input class="search" id="search" placeholder="Search name or SKU…" oninput="apply()">
+          <select class="search" id="unit-filter" onchange="apply()" style="min-width:140px">
+            <option value="">All units</option>
+          </select>
+        </div>
+      </div>
+      <div id="table"><div class="skeleton">Loading products…</div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Create / Edit modal -->
+<div class="modal-back" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title">New Product</h3>
+      <p id="modal-sub">The company is assigned automatically by the backend.</p>
+    </div>
+
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field"><label>SKU</label><input id="f-sku" placeholder="FLR-001"></div>
+        <div class="field"><label>Unit</label>
+          <select id="f-unit">
+            <option value="kg">Kilogram</option><option value="gm">Gram</option>
+            <option value="litre">Litre</option><option value="pcs">Pieces</option>
+            <option value="box">Box</option><option value="OTHERS">Others</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field"><label>Name</label><input id="f-name" placeholder="Product name"></div>
+      <div class="field"><label>Description</label><textarea id="f-desc" rows="2" placeholder="Optional"></textarea></div>
+
+      <!-- warehouse + starting qty only shown when creating -->
+      <div id="create-only">
+        <div class="field-row">
+          <div class="field">
+            <label>Warehouse (optional)</label>
+            <select id="f-warehouse"><option value="">— none —</option></select>
+          </div>
+          <div class="field"><label>Starting quantity</label><input id="f-initial-qty" type="number" min="0" value="0"></div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>Minimum stock</label><input id="f-min" type="number" value="0"></div>
+        <div class="field"><label>Alert level</label><input id="f-alert" type="number" value="0"></div>
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>Net Weight (kg)</label><input type="number" step="0.01" id="f-net-weight" value="0"></div>
+        <div class="field"><label>Volume (CBM)</label><input type="number" step="0.001" id="f-volume" value="0"></div>
+      </div>
+
+      <div class="field-row">
+        <div class="field"><label>Pricing per Unit (optional)</label><input type="number" step="0.01" id="f-pricing" placeholder="leave blank if none"></div>
+        <div class="field"><label>Expiry Date (optional)</label><input type="date" id="f-expiry"></div>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="save-btn" onclick="save()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirm modal -->
+<div class="modal-back" id="del-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-head"><h3>Delete product?</h3><p id="del-text">This can't be undone.</p></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeDel()">Cancel</button>
+      <button class="btn btn-danger" id="del-btn" onclick="confirmDelete()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _all = [];
+let _editingId = null;   // null = creating, otherwise editing this id
+let _deletingId = null;
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  try {
+    const [products, warehouses] = await Promise.all([api.products(), api.warehouses()]);
+    _all = products;
+    await UI.mountShell("box");
+    document.getElementById("add-icon").innerHTML = UI.ICONS.plus;
+    document.getElementById("f-warehouse").innerHTML =
+      '<option value="">— none —</option>' +
+      warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join("");
+    const units = [...new Set(products.map(p => p.unit))];
+    document.getElementById("unit-filter").innerHTML =
+      '<option value="">All units</option>' + units.map(u => `<option value="${u}">${u}</option>`).join("");
+    apply();
+  } catch (err) {
+    console.error("Failed to load products:", err);
+    document.getElementById("table").innerHTML = `<div class="empty">Couldn't load data. Check the console.</div>`;
+  }
+}
+
+function apply() {
+  const q = (document.getElementById("search").value || "").toLowerCase();
+  const uf = document.getElementById("unit-filter").value;
+  const rows = _all.filter(p =>
+    (!uf || p.unit === uf) &&
+    ((p.name || "").toLowerCase().includes(q) || (p.sku || "").toLowerCase().includes(q))
+  );
+  const el = document.getElementById("table");
+  if (!rows.length) { el.innerHTML = `<div class="empty">No products match your filters.</div>`; return; }
+  el.innerHTML = `
+    <table><thead><tr>
+      <th>Product</th><th>SKU</th><th>Unit</th><th>Total Stock</th><th>Price/Unit</th><th>Total Value</th><th>Expiry</th><th></th>
+    </tr></thead><tbody>
+    ${rows.map(p => `
+      <tr>
+        <td><span class="strong">${p.name}</span>${p.description ? `<br><small style="color:var(--ink-3)">${p.description}</small>` : ""}</td>
+        <td class="mono">${p.sku || "—"}</td>
+        <td>${p.unit}</td>
+        <td><span class="strong">${(p.total_stock ?? 0).toLocaleString()}</span> ${p.unit}</td>
+        <td>${UI.fmtMoney(p.pricing)}</td>
+        <td>${UI.fmtMoney(p.total_value)}</td>
+        <td>${UI.expiryChip(p.expiry_status, p.days_to_expiry)}</td>
+        <td>
+          <div class="row-actions">
+            <button class="icon-btn edit" title="Edit" onclick="openEdit(${p.id})">${UI.ICONS.edit}</button>
+            <button class="icon-btn del" title="Delete" onclick="openDel(${p.id})">${UI.ICONS.trash}</button>
+          </div>
+        </td>
+      </tr>`).join("")}
+    </tbody></table>`;
+}
+
+/* ---------- create / edit modal ---------- */
+function openCreate() {
+  _editingId = null;
+  document.getElementById("modal-title").textContent = "New Product";
+  document.getElementById("modal-sub").textContent = "The company is assigned automatically by the backend.";
+  document.getElementById("save-btn").textContent = "Create";
+  document.getElementById("create-only").style.display = "";   // show warehouse fields
+  // clear all fields
+  ["f-sku","f-name","f-desc","f-pricing","f-expiry"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("f-min").value = 0;
+  document.getElementById("f-alert").value = 0;
+  document.getElementById("f-net-weight").value = 0;
+  document.getElementById("f-volume").value = 0;
+  document.getElementById("f-initial-qty").value = 0;
+  document.getElementById("f-warehouse").value = "";
+  document.getElementById("f-unit").value = "kg";
+  openModal();
+}
+
+function openEdit(id) {
+  const p = _all.find(x => x.id === id);
+  if (!p) return;
+  _editingId = id;
+  document.getElementById("modal-title").textContent = "Edit Product";
+  document.getElementById("modal-sub").textContent = "Update any field. Stock quantities are managed on the Stock page.";
+  document.getElementById("save-btn").textContent = "Save changes";
+  document.getElementById("create-only").style.display = "none";   // hide warehouse/qty when editing
+  // prefill
+  document.getElementById("f-sku").value = p.sku || "";
+  document.getElementById("f-unit").value = p.unit || "kg";
+  document.getElementById("f-name").value = p.name || "";
+  document.getElementById("f-desc").value = p.description || "";
+  document.getElementById("f-min").value = p.minimum_stock_level ?? 0;
+  document.getElementById("f-alert").value = p.alert_stock_level ?? 0;
+  document.getElementById("f-net-weight").value = p.net_weight ?? 0;
+  document.getElementById("f-volume").value = p.volume_cbm ?? 0;
+  document.getElementById("f-pricing").value = p.pricing ?? "";
+  document.getElementById("f-expiry").value = p.expiry_date || "";
+  openModal();
+}
+
+function openModal(){ document.getElementById("modal").classList.add("open"); }
+function closeModal(){ document.getElementById("modal").classList.remove("open"); }
+
+async function save() {
+  const priceRaw = document.getElementById("f-pricing").value.trim();
+  const d = {
+    sku: document.getElementById("f-sku").value.trim() || null,
+    unit: document.getElementById("f-unit").value,
+    name: document.getElementById("f-name").value.trim(),
+    description: document.getElementById("f-desc").value.trim() || "",
+    minimum_stock_level: parseInt(document.getElementById("f-min").value) || 0,
+    alert_stock_level: parseInt(document.getElementById("f-alert").value) || 0,
+    pricing: priceRaw === "" ? null : parseFloat(priceRaw),
+    expiry_date: document.getElementById("f-expiry").value || null,
+    net_weight: parseFloat(document.getElementById("f-net-weight").value) || 0,
+    volume_cbm: parseFloat(document.getElementById("f-volume").value) || 0,
+  };
+  if (!d.name) return alert("Product name is required.");
+
+  const btn = document.getElementById("save-btn");
+  btn.disabled = true;
+
+  try {
+    if (_editingId === null) {
+      // creating: include warehouse + starting qty
+      d.warehouse = document.getElementById("f-warehouse").value || null;
+      d.initial_quantity = parseInt(document.getElementById("f-initial-qty").value) || 0;
+      await api.createProduct(d);
+    } else {
+      // editing: PATCH the existing product
+      await api.updateProduct(_editingId, d);
+    }
+    closeModal();
+    _all = await api.products();
+    apply();
+  } catch (error) {
+    console.error(error);
+    const msg = humanizeError(error.message);
+    alert(msg);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- delete ---------- */
+function openDel(id) {
+  const p = _all.find(x => x.id === id);
+  _deletingId = id;
+  document.getElementById("del-text").textContent =
+    `"${p ? p.name : "This product"}" will be permanently removed, along with its stock records. This can't be undone.`;
+  document.getElementById("del-modal").classList.add("open");
+}
+function closeDel(){ document.getElementById("del-modal").classList.remove("open"); }
+async function confirmDelete() {
+  const btn = document.getElementById("del-btn");
+  btn.disabled = true;
+  try {
+    await api.deleteProduct(_deletingId);
+    closeDel();
+    _all = await api.products();
+    apply();
+  } catch (error) {
+    console.error(error);
+    alert(humanizeError(error.message));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* turn a raw "API 400: {json}" into a friendly message */
+function humanizeError(message) {
+  const raw = (message || "").split(/API \d+:\s*/).pop();
+  try {
+    const obj = JSON.parse(raw);
+    if (obj.sku)  return "That SKU is already used by another product. Please use a unique SKU.";
+    if (obj.name) return "A product with that name already exists in your company.";
+    // generic: first field error
+    const firstKey = Object.keys(obj)[0];
+    if (firstKey) return `${firstKey}: ${[].concat(obj[firstKey]).join(" ")}`;
+  } catch (_) {}
+  return "Couldn't save. " + raw;
+}
+
+load();
+</script>
+</body>
+</html>

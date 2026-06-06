@@ -1,0 +1,118 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Warehouses</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Network</div>
+        <h1 class="page-title">Warehouses</h1>
+        <p class="page-desc">Every storage facility registered to your company. Click a card to see its products.</p>
+      </div>
+      <button class="btn btn-primary" data-reveal style="animation-delay:.05s" onclick="openModal()">
+        <span id="add-icon"></span> New Warehouse
+      </button>
+    </div>
+    <div class="wh-grid" id="grid"><div class="skeleton">Loading warehouses…</div></div>
+  </main>
+</div>
+
+<!-- Modal -->
+<div class="modal-back" id="modal">
+  <div class="modal">
+    <div class="modal-head"><h3>New Warehouse</h3><p>Company &amp; creator are assigned automatically by the backend.</p></div>
+    <div class="modal-body">
+      <div class="field"><label>Name</label><input id="f-name" placeholder="e.g. Central Dry Store"></div>
+      <div class="field"><label>Location</label><input id="f-loc" placeholder="City — District"></div>
+      <div class="field"><label>Type</label>
+        <select id="f-type">
+          <option value="raw_material">Raw Material</option>
+          <option value="finished_goods">Finished Goods</option>
+          <option value="consumables">Consumables</option>
+          <option value="OTHERS">Others</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="save()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _stocks = [];
+async function load() {
+  if (!UI.requireAuth()) return;
+  try {
+    const [warehouses, stocks] = await Promise.all([api.warehouses(), api.stocks()]);
+    _stocks = stocks;
+    await UI.mountShell("warehouse");
+    document.getElementById("add-icon").innerHTML = UI.ICONS.plus;
+    render(warehouses);
+  } catch (err) {
+    console.error(err);
+    document.getElementById("grid").innerHTML = `<div class="empty">Couldn't load warehouses. Check the console.</div>`;
+  }
+}
+function render(warehouses) {
+  const grid = document.getElementById("grid");
+  if (!warehouses.length) { grid.innerHTML = `<div class="empty">No warehouses yet.</div>`; return; }
+  grid.innerHTML = warehouses.map((w, i) => {
+    const recs = _stocks.filter(s => s.warehouse === w.id);
+    const products = recs.length;                                  // distinct products in this warehouse
+    const units = recs.reduce((a, s) => a + s.quantity, 0);        // total units on hand
+    const value = recs.reduce((a, s) => a + (s.line_value || 0), 0); // total value
+    return `
+    <a class="wh-card clickable" href="/warehouse/${w.id}/" data-reveal style="animation-delay:${0.05 + i*0.05}s">
+      <div class="wh-top">
+        <div class="wh-icon">${UI.ICONS.warehouse}</div>
+        ${UI.badgeFor(w.type)}
+      </div>
+      <div class="wh-name">${w.name}</div>
+      <div class="wh-loc">${UI.ICONS.pin} ${w.location}</div>
+      <div class="wh-meta">
+        <div><span class="k">Products</span><span class="v">${products}</span></div>
+        <div><span class="k">Units</span><span class="v">${units.toLocaleString()}</span></div>
+        <div><span class="k">Value</span><span class="v money" style="font-size:18px;padding-top:5px">${value ? value.toLocaleString() : "—"}</span></div>
+      </div>
+      <div class="wh-cta">View products ${UI.ICONS.chevron}</div>
+    </a>`;
+  }).join("");
+}
+function openModal(){ document.getElementById("modal").classList.add("open"); }
+function closeModal(){ document.getElementById("modal").classList.remove("open"); }
+async function save() {
+  const name = document.getElementById("f-name").value.trim();
+  const location = document.getElementById("f-loc").value.trim();
+  const type = document.getElementById("f-type").value;
+  if (!name || !location) return alert("Name and location are required.");
+  try {
+    await api.createWarehouse({ name, location, type });
+    closeModal();
+    document.getElementById("f-name").value = "";
+    document.getElementById("f-loc").value = "";
+    const [warehouses, stocks] = await Promise.all([api.warehouses(), api.stocks()]);
+    _stocks = stocks;
+    render(warehouses);
+  } catch (error) {
+    console.error(error);
+    const msg = (error.message || "").split(/API \d+:\s*/).pop();
+    alert("Couldn't save the warehouse.\n\n" + msg);
+  }
+}
+load();
+</script>
+</body>
+</html>

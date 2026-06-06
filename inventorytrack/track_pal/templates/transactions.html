@@ -1,0 +1,227 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Transactions</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Stock Movements</div>
+        <h1 class="page-title">Transactions</h1>
+        <p class="page-desc">Record stock going in or out. Each movement updates warehouse stock instantly.</p>
+      </div>
+    </div>
+
+    <!-- Record a movement -->
+    <div class="panel" data-reveal style="animation-delay:.08s">
+      <div class="panel-head"><h2>Record a Movement</h2></div>
+      <div style="padding:20px 22px">
+        <div class="seg" id="type-seg" style="max-width:380px;margin-bottom:16px">
+          <button class="in active" data-type="stock_in" onclick="pickType(this)">Stock In ↑</button>
+          <button class="out" data-type="stock_out" onclick="pickType(this)">Stock Out ↓</button>
+          <button class="adj" data-type="adjustment" onclick="pickType(this)">Adjust =</button>
+        </div>
+
+        <div class="txn-form">
+          <div class="field">
+            <label>Warehouse</label>
+            <select id="f-warehouse" onchange="syncHint()"></select>
+          </div>
+          <div class="field">
+            <label>Product</label>
+            <select id="f-product" onchange="syncHint()"></select>
+          </div>
+          <div class="field">
+            <label id="qty-label">Quantity to add</label>
+            <input id="f-qty" type="number" step="0.01" min="0" placeholder="0" oninput="syncHint()">
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <div id="qty-hint" style="font-size:12px;color:var(--ink-3);padding:10px 0">—</div>
+          </div>
+          <div class="field">
+            <label>Note (optional)</label>
+            <input id="f-note" placeholder="e.g. supplier delivery">
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" id="record-btn" onclick="record()">Record</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="panel" data-reveal style="animation-delay:.16s; margin-top:22px">
+      <div class="panel-head">
+        <h2>Movement History</h2>
+        <div class="panel-tools">
+          <input class="search" id="search" placeholder="Search product…" oninput="renderHistory()">
+          <select class="search" id="type-filter" onchange="renderHistory()" style="min-width:150px">
+            <option value="">All types</option>
+            <option value="stock_in">Stock In</option>
+            <option value="stock_out">Stock Out</option>
+            <option value="adjustment">Adjustment</option>
+          </select>
+        </div>
+      </div>
+      <div id="history"><div class="skeleton">Loading…</div></div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _warehouses = [], _products = [], _stocks = [], _txns = [];
+let _type = "stock_in";
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  try {
+    const [warehouses, products, stocks, txns] = await Promise.all([
+      api.warehouses(), api.products(), api.stocks(), api.transactions()
+    ]);
+    _warehouses = warehouses; _products = products; _stocks = stocks; _txns = txns;
+    await UI.mountShell("swap");
+
+    document.getElementById("f-warehouse").innerHTML =
+      warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join("");
+    document.getElementById("f-product").innerHTML =
+      products.map(p => `<option value="${p.id}">${p.name} (${p.unit})</option>`).join("");
+
+    syncHint();
+    renderHistory();
+  } catch (err) {
+    console.error(err);
+    document.getElementById("history").innerHTML = `<div class="empty">Couldn't load data. Check the console.</div>`;
+  }
+}
+
+function pickType(btn) {
+  _type = btn.dataset.type;
+  [...document.querySelectorAll("#type-seg button")].forEach(b => b.classList.toggle("active", b === btn));
+  const label = document.getElementById("qty-label");
+  label.textContent = _type === "stock_in" ? "Quantity to add"
+                    : _type === "stock_out" ? "Quantity to remove"
+                    : "Set stock to";
+  syncHint();
+}
+
+// show current stock for the chosen product+warehouse and the resulting level
+function currentStock(whId, prodId) {
+  const s = _stocks.find(x => x.warehouse === whId && x.product === prodId);
+  return s ? Number(s.quantity) : 0;
+}
+function syncHint() {
+  const whId = parseInt(document.getElementById("f-warehouse").value);
+  const prodId = parseInt(document.getElementById("f-product").value);
+  const qty = parseFloat(document.getElementById("f-qty").value) || 0;
+  const prod = _products.find(p => p.id === prodId);
+  const unit = prod ? prod.unit : "";
+  const cur = currentStock(whId, prodId);
+  let after = cur;
+  if (_type === "stock_in") after = cur + qty;
+  else if (_type === "stock_out") after = cur - qty;
+  else after = qty;
+  const hint = document.getElementById("qty-hint");
+  let warn = "";
+  if (_type === "stock_out" && qty > cur) warn = ` — not enough!`;
+  hint.innerHTML = `Now: <b style="color:var(--ink)">${UI.fmtQty(cur)}</b> ${unit} → After: <b style="color:${after < 0 ? 'var(--red)' : 'var(--ink)'}">${UI.fmtQty(after)}</b> ${unit}<span style="color:var(--red)">${warn}</span>`;
+}
+
+async function record() {
+  const d = {
+    warehouse: parseInt(document.getElementById("f-warehouse").value),
+    product: parseInt(document.getElementById("f-product").value),
+    quantity: parseFloat(document.getElementById("f-qty").value) || 0,
+    transaction_type: _type,
+    note: document.getElementById("f-note").value.trim() || null,
+  };
+  if (!d.warehouse || !d.product) return alert("Pick a warehouse and a product.");
+  if (d.quantity <= 0) return alert("Quantity must be greater than zero.");
+
+  const btn = document.getElementById("record-btn");
+  btn.disabled = true; btn.textContent = "Recording…";
+  try {
+    await api.createTransaction(d);
+    // refresh stock + history
+    [_stocks, _txns] = await Promise.all([api.stocks(), api.transactions()]);
+    document.getElementById("f-qty").value = "";
+    document.getElementById("f-note").value = "";
+    syncHint();
+    renderHistory();
+  } catch (error) {
+    console.error(error);
+    alert(humanizeError(error.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "Record";
+  }
+}
+
+function typeBadge(t) {
+  if (t === "stock_in")  return '<span class="badge txn-in">Stock In</span>';
+  if (t === "stock_out") return '<span class="badge txn-out">Stock Out</span>';
+  return '<span class="badge txn-adj">Adjustment</span>';
+}
+
+function renderHistory() {
+  const q = (document.getElementById("search").value || "").toLowerCase();
+  const tf = document.getElementById("type-filter").value;
+  const rows = _txns.filter(t =>
+    (!tf || t.transaction_type === tf) &&
+    (t.product_name || "").toLowerCase().includes(q)
+  );
+  const el = document.getElementById("history");
+  if (!rows.length) { el.innerHTML = `<div class="empty">No transactions yet.</div>`; return; }
+  el.innerHTML = `
+    <table><thead><tr>
+      <th>When</th><th>Type</th><th>Product</th><th>Warehouse</th><th>Quantity</th><th>Note</th><th>By</th>
+    </tr></thead><tbody>
+    ${rows.map(t => {
+      const sign = t.transaction_type === "stock_in" ? "+" : t.transaction_type === "stock_out" ? "−" : "=";
+      const cls = t.transaction_type === "stock_in" ? "txn-qty-in" : t.transaction_type === "stock_out" ? "txn-qty-out" : "";
+      return `
+      <tr>
+        <td>${fmtWhen(t.timestamp)}</td>
+        <td>${typeBadge(t.transaction_type)}</td>
+        <td><span class="strong">${t.product_name}</span></td>
+        <td>${t.warehouse_name}</td>
+        <td><span class="${cls}">${sign} ${UI.fmtQty(t.quantity)}</span> ${t.product_unit || ""}</td>
+        <td style="color:var(--ink-3)">${t.note || "—"}</td>
+        <td style="color:var(--ink-3)">${t.created_by_username || "—"}</td>
+      </tr>`;
+    }).join("")}
+    </tbody></table>`;
+}
+
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short" }) + " " +
+         d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
+}
+
+function humanizeError(message) {
+  const raw = (message || "").split(/API \d+:\s*/).pop();
+  try {
+    const obj = JSON.parse(raw);
+    if (obj.detail) return obj.detail;            // "Not enough stock…"
+    if (Array.isArray(obj)) return obj.join(" ");
+    const k = Object.keys(obj)[0];
+    if (k) return `${k}: ${[].concat(obj[k]).join(" ")}`;
+  } catch (_) {}
+  return "Couldn't record. " + raw;
+}
+
+load();
+</script>
+</body>
+</html>
