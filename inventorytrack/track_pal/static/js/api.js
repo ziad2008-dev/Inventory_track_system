@@ -12,7 +12,7 @@
    ============================================================= */
 
 const USE_MOCK = false;  // Toggle this to switch between mock data and real API calls
-const API_BASE = "http://127.0.0.1:8000";  // Set this to your Django backend URL when USE_MOCK is false
+const API_BASE = "";  // Set this to your Django backend URL when USE_MOCK is false
 
 const ENDPOINTS = {
   warehouses: "/api/warehouses/",
