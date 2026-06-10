@@ -4,7 +4,7 @@ from .serializers import SellableProductSerializer, warehouseSerializer, product
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated
 from django.views.generic import TemplateView
 from django.db import transaction as db_transaction
@@ -152,6 +152,94 @@ class SellableProductViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Your account isn't linked to a company yet.")
         self._check_ingredients_belong_to_company(comp)
         serializer.save(company=comp)
+
+    @action(detail=True, methods=['post'])
+    def produce(self, request, pk=None):
+        """Produce a batch of this finished product.
+        Body: { "warehouse": <id>, "quantity": <batch size> }
+        - needed[ingredient] = recipe.quantity * batch
+        - blocks if ANY ingredient is short (nothing deducted)
+        - deducts each ingredient (stock_out), adds finished goods (stock_in)
+        - all atomic
+        """
+        comp = _user_company(request)
+        if comp is None:
+            raise PermissionDenied("Your account isn't linked to a company yet.")
+
+        sellable = self.get_object()  # already company-scoped by get_queryset
+
+        wh_id = request.data.get('warehouse')
+        try:
+            batch = Decimal(str(request.data.get('quantity')))
+        except (TypeError, ValueError, ArithmeticError):
+            raise ValidationError("Quantity must be a number.")
+        if batch <= 0:
+            raise ValidationError("Quantity must be greater than zero.")
+
+        try:
+            wh = warehouse.objects.get(id=wh_id, company=comp)
+        except warehouse.DoesNotExist:
+            raise ValidationError("Pick a valid warehouse in your company.")
+
+        recipe = list(sellable.recipe_items.select_related('ingredient').all())
+        if not recipe:
+            raise ValidationError("This product has no recipe, so nothing can be produced.")
+
+        with db_transaction.atomic():
+            # 1) check every ingredient has enough, lock the rows
+            shortages = []
+            stock_rows = {}
+            for item in recipe:
+                needed = Decimal(item.quantity) * batch
+                stock = warehouse_stock.objects.select_for_update().filter(
+                    warehouse=wh, product=item.ingredient
+                ).first()
+                have = Decimal(stock.quantity) if stock else Decimal('0')
+                if needed > have:
+                    shortages.append(
+                        f"{item.ingredient.name}: need {needed} {item.ingredient.unit}, have {have}"
+                    )
+                stock_rows[item.ingredient.id] = (stock, needed)
+
+            if shortages:
+                raise ValidationError({
+                    "detail": "Not enough stock to produce this batch.",
+                    "shortages": shortages,
+                })
+
+            # 2) deduct ingredients + log stock_out
+            for item in recipe:
+                stock, needed = stock_rows[item.ingredient.id]
+                stock.quantity = Decimal(stock.quantity) - needed
+                stock.save()
+                InventoryTransaction.objects.create(
+                    warehouse=wh, product=item.ingredient, quantity=needed,
+                    transaction_type='stock_out',
+                    note=f"Produced {batch} x {sellable.name}",
+                    created_by=request.user,
+                )
+
+            # 3) add finished goods to stock + log stock_in
+            fp = sellable.finished_product
+            if fp is not None:
+                fstock, _ = warehouse_stock.objects.select_for_update().get_or_create(
+                    warehouse=wh, product=fp, defaults={'quantity': 0}
+                )
+                fstock.quantity = Decimal(fstock.quantity) + batch
+                fstock.save()
+                InventoryTransaction.objects.create(
+                    warehouse=wh, product=fp, quantity=batch,
+                    transaction_type='stock_in',
+                    note=f"Produced batch of {sellable.name}",
+                    created_by=request.user,
+                )
+
+        return Response({
+            "produced": float(batch),
+            "product": sellable.name,
+            "warehouse": wh.name,
+            "message": f"Produced {batch} x {sellable.name}. Ingredients deducted from {wh.name}.",
+        }, status=status.HTTP_200_OK)
 
 
 class InventoryTransactionViewSet(viewsets.ModelViewSet):

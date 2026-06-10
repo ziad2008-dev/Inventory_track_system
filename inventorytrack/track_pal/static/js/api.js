@@ -63,7 +63,6 @@ const api = {
   isAuthenticated() { return !!localStorage.getItem("auth_token"); },
 
   async login(username, password) {
-    // POST /api/token/ -> { access, refresh }
     const res = await fetch(API_BASE + "/api/token/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

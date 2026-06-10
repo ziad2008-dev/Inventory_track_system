@@ -81,20 +81,55 @@
   </div>
 </div>
 
+<!-- Produce modal -->
+<div class="modal-back" id="produce-modal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head">
+      <h3 id="produce-title">Produce a Batch</h3>
+      <p>Deducts ingredients from the chosen warehouse and adds finished units to stock.</p>
+    </div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field">
+          <label>Warehouse</label>
+          <select id="p-warehouse"></select>
+        </div>
+        <div class="field">
+          <label>Batch size (units to make)</label>
+          <input id="p-qty" type="number" step="1" min="1" value="1" oninput="recalcProduce()">
+        </div>
+      </div>
+      <div class="recipe-head"><label>Will consume</label></div>
+      <div id="p-consume"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeProduce()">Cancel</button>
+      <button class="btn btn-primary" id="produce-btn" onclick="confirmProduce()">Produce</button>
+    </div>
+  </div>
+</div>
+
 <script src="{% static 'js/api.js' %}"></script>
 <script src="{% static 'js/ui.js' %}"></script>
 <script>
 let _all = [];          // sellable products
 let _materials = [];    // raw products (ingredients) with pricing
+let _warehouses = [];   // for produce
+let _stocks = [];       // for produce availability preview
 let _editingId = null;
 let _deletingId = null;
+let _producingId = null;
 
 async function load() {
   if (!UI.requireAuth()) return;
   try {
-    const [sellables, products] = await Promise.all([api.sellables(), api.products()]);
+    const [sellables, products, warehouses, stocks] = await Promise.all([
+      api.sellables(), api.products(), api.warehouses(), api.stocks()
+    ]);
     _all = sellables;
     _materials = products;
+    _warehouses = warehouses;
+    _stocks = stocks;
     await UI.mountShell("tag");
     document.getElementById("add-icon").innerHTML = UI.ICONS.plus;
     document.getElementById("row-plus").innerHTML = UI.ICONS.plus;
@@ -133,6 +168,7 @@ function apply() {
         <td>${marginTxt}</td>
         <td>
           <div class="row-actions">
+            <button class="icon-btn produce" title="Produce a batch" onclick="openProduce(${s.id})">${UI.ICONS.produce}</button>
             <button class="icon-btn edit" title="Edit" onclick="openEdit(${s.id})">${UI.ICONS.edit}</button>
             <button class="icon-btn del" title="Delete" onclick="openDel(${s.id})">${UI.ICONS.trash}</button>
           </div>
@@ -300,6 +336,79 @@ async function confirmDelete() {
   } finally {
     btn.disabled = false;
   }
+}
+
+/* ---------- produce ---------- */
+function openProduce(id) {
+  const s = _all.find(x => x.id === id);
+  if (!s) return;
+  _producingId = id;
+  document.getElementById("produce-title").textContent = `Produce: ${s.name}`;
+  document.getElementById("p-warehouse").innerHTML =
+    _warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join("");
+  document.getElementById("p-qty").value = 1;
+  recalcProduce();
+  document.getElementById("produce-modal").classList.add("open");
+}
+function closeProduce(){ document.getElementById("produce-modal").classList.remove("open"); }
+
+function stockOf(whId, prodId) {
+  const s = _stocks.find(x => x.warehouse === whId && x.product === prodId);
+  return s ? Number(s.quantity) : 0;
+}
+
+function recalcProduce() {
+  const s = _all.find(x => x.id === _producingId);
+  const whId = parseInt(document.getElementById("p-warehouse").value);
+  const batch = parseFloat(document.getElementById("p-qty").value) || 0;
+  const el = document.getElementById("p-consume");
+  if (!s || !s.recipe_items || !s.recipe_items.length) {
+    el.innerHTML = `<div class="recipe-empty">No recipe — nothing to consume.</div>`;
+    return;
+  }
+  el.innerHTML = s.recipe_items.map(it => {
+    const need = Number(it.quantity) * batch;
+    const have = stockOf(whId, it.ingredient);
+    const short = need > have;
+    return `<div class="recipe-row" style="grid-template-columns:1fr auto auto">
+      <span>${it.ingredient_name}</span>
+      <span class="line-cost" style="color:${short ? 'var(--red)' : 'var(--ink-2)'}">${UI.fmtQty(need)} ${it.ingredient_unit}</span>
+      <span style="font-size:12px;color:${short ? 'var(--red)' : 'var(--ink-3)'}">have ${UI.fmtQty(have)}${short ? ' — short!' : ''}</span>
+    </div>`;
+  }).join("");
+}
+
+async function confirmProduce() {
+  const whId = parseInt(document.getElementById("p-warehouse").value);
+  const batch = parseFloat(document.getElementById("p-qty").value) || 0;
+  if (!whId) return alert("Pick a warehouse.");
+  if (batch <= 0) return alert("Batch size must be greater than zero.");
+
+  const btn = document.getElementById("produce-btn");
+  btn.disabled = true; btn.textContent = "Producing…";
+  try {
+    await api.produceSellable(_producingId, { warehouse: whId, quantity: batch });
+    closeProduce();
+    // refresh stock + sellables so finished-goods stock and previews update
+    [_stocks, _all] = await Promise.all([api.stocks(), api.sellables()]);
+    apply();
+    alert("Batch produced. Ingredients deducted and finished goods added to stock.");
+  } catch (error) {
+    console.error(error);
+    alert(humanizeProduceError(error.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "Produce";
+  }
+}
+
+function humanizeProduceError(message) {
+  const raw = (message || "").split(/API \d+:\s*/).pop();
+  try {
+    const obj = JSON.parse(raw);
+    if (obj.shortages) return "Not enough stock:\n\n" + obj.shortages.join("\n");
+    if (obj.detail) return obj.detail;
+  } catch (_) {}
+  return "Couldn't produce. " + raw;
 }
 
 function humanizeError(message) {
