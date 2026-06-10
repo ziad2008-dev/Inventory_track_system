@@ -441,3 +441,6 @@ td .strong { color: var(--ink); font-weight: 600; }
 .seg button.active.adj { background: #4fd1c520; color: var(--teal); }
 
 @media (max-width: 1000px){ .txn-form { grid-template-columns: 1fr 1fr; } }
+
+/* produce button accent */
+.icon-btn.produce:hover { border-color: var(--teal); color: var(--teal); }

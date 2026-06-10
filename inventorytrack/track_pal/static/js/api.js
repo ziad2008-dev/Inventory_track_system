@@ -12,7 +12,7 @@
    ============================================================= */
 
 const USE_MOCK = false;  // Toggle this to switch between mock data and real API calls
-const API_BASE = "";  // Set this to your Django backend URL when USE_MOCK is false
+const API_BASE = "http://127.0.0.1:8000";  // Set this to your Django backend URL when USE_MOCK is false
 
 const ENDPOINTS = {
   warehouses: "/api/warehouses/",
@@ -63,6 +63,7 @@ const api = {
   isAuthenticated() { return !!localStorage.getItem("auth_token"); },
 
   async login(username, password) {
+    // POST /api/token/ -> { access, refresh }
     const res = await fetch(API_BASE + "/api/token/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -171,6 +172,7 @@ const api = {
   createSellable(d)     { return this._fetch("/api/sellable-products/", { method: "POST", body: JSON.stringify(d) }); },
   updateSellable(id, d) { return this._fetch(`/api/sellable-products/${id}/`, { method: "PATCH", body: JSON.stringify(d) }); },
   deleteSellable(id)    { return this._fetch(`/api/sellable-products/${id}/`, { method: "DELETE" }); },
+  produceSellable(id, d){ return this._fetch(`/api/sellable-products/${id}/produce/`, { method: "POST", body: JSON.stringify(d) }); },
   updateStock(id, qty) {
     if (!USE_MOCK) return this._fetch(`${ENDPOINTS.stocks}${id}/`, { method: "PATCH", body: JSON.stringify({ quantity: qty }) });
     return _delay().then(() => {

@@ -151,9 +151,11 @@ class SellableProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = SellableProduct
         fields = ['id', 'company', 'name', 'sku', 'selling_price', 'created_at',
-                  'recipe_items', 'total_cost', 'profit', 'margin_percent']
+                  'recipe_items', 'total_cost', 'profit', 'margin_percent',
+                  'finished_product']
         read_only_fields = ['id', 'company', 'created_at',
-                            'total_cost', 'profit', 'margin_percent']
+                            'total_cost', 'profit', 'margin_percent',
+                            'finished_product']
 
     def get_total_cost(self, obj):
         total = 0.0
@@ -177,6 +179,17 @@ class SellableProductSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items = validated_data.pop('recipe_items', [])
         sellable = SellableProduct.objects.create(**validated_data)
+        # auto-create a stockable product to represent this finished good,
+        # so production can add finished units to warehouse stock
+        comp = sellable.company
+        fp = product.objects.create(
+            company=comp,
+            name=f"[Finished] {sellable.name}",
+            unit='pcs',
+            pricing=sellable.selling_price,
+        )
+        sellable.finished_product = fp
+        sellable.save()
         for item in items:
             RecipeItem.objects.create(sellable=sellable, **item)
         return sellable
