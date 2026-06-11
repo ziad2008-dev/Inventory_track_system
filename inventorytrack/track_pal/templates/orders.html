@@ -55,9 +55,10 @@
       <p>Create an order. It starts as “pending” and only changes stock when you mark it delivered.</p>
     </div>
     <div class="modal-body">
+      <div class="recipe-head" style="margin-top:0"><label>Direction</label></div>
       <div class="seg dir" id="dir-seg" style="margin-bottom:16px">
-        <button class="inc active" data-dir="incoming" onclick="pickDir(this)">Incoming ↓ (from supplier)</button>
-        <button class="outg" data-dir="outgoing" onclick="pickDir(this)">Outgoing ↑ (to customer)</button>
+        <button class="inc active" data-dir="incoming" onclick="pickDir(this)">↓ Incoming (supplier)</button>
+        <button class="outg" data-dir="outgoing" onclick="pickDir(this)">↑ Outgoing (customer)</button>
       </div>
       <div class="field-row">
         <div class="field"><label>Warehouse</label><select id="f-warehouse"></select></div>

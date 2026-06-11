@@ -432,9 +432,11 @@ td .strong { color: var(--ink); font-weight: 600; }
 /* segmented type picker */
 .seg { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .seg button {
-  flex: 1; background: var(--bg-grad-2); border: none; color: var(--ink-2);
-  padding: 10px 8px; font-family: var(--sans); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: .15s;
+  flex: 1; background: var(--panel); border: none; color: var(--ink-3);
+  padding: 11px 8px; min-height: 42px; line-height: 1.2; box-sizing: border-box;
+  font-family: var(--sans); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: .15s;
 }
+.seg button:hover { color: var(--ink); background: var(--bg-grad-2); }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.active.in  { background: #6fcf9720; color: var(--green); }
 .seg button.active.out { background: #e26d6d20; color: var(--red); }
@@ -464,5 +466,7 @@ td .strong { color: var(--ink); font-weight: 600; }
 .stage-btn.deliver:hover { border-color: var(--green); color: var(--green); }
 .stage-btn.cancel:hover { border-color: var(--red); color: var(--red); }
 
+.seg.dir { min-height: 44px; }
+.seg.dir button { display: flex; align-items: center; justify-content: center; min-height: 44px; font-size: 13px; }
 .seg.dir button.active.inc { background: #6fcf9720; color: var(--green); }
 .seg.dir button.active.outg { background: #4fd1c520; color: var(--teal); }
