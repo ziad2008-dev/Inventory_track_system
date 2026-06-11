@@ -1,0 +1,210 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Record a Sale</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Point of Sale</div>
+        <h1 class="page-title">Record a Sale</h1>
+        <p class="page-desc">Add what was sold. Items with a recipe deduct ingredients from stock automatically; others are just recorded.</p>
+      </div>
+    </div>
+
+    <div id="no-wh" class="banner banner-warn" style="display:none;margin-bottom:18px">
+      <div class="banner-text"><strong>No sales warehouse set.</strong> Pick the warehouse sales deduct from below — it's saved as your default.</div>
+    </div>
+
+    <div class="sale-grid">
+      <!-- Basket -->
+      <div class="panel" data-reveal>
+        <div class="panel-head"><h2>New Sale</h2>
+          <div class="panel-tools">
+            <label style="font-size:12px;color:var(--ink-3)">Deduct from</label>
+            <select class="search" id="sale-wh" onchange="saveDefaultWh()" style="min-width:170px"></select>
+          </div>
+        </div>
+        <div style="padding:16px 20px">
+          <div class="field" style="margin-bottom:14px">
+            <label>Add item</label>
+            <select id="item-pick" onchange="addToBasket()"></select>
+          </div>
+          <div id="basket"></div>
+          <div class="sale-total-row">
+            <span>Total</span>
+            <span id="sale-total" class="money">0.00</span>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label>Note (optional)</label>
+            <input id="sale-note" placeholder="table 4, takeaway, etc.">
+          </div>
+          <button class="btn btn-primary" id="record-btn" onclick="record()" style="width:100%;justify-content:center;margin-top:8px">Record Sale</button>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="panel" data-reveal style="animation-delay:.08s">
+        <div class="panel-head"><h2>Recent Sales</h2></div>
+        <div id="history"><div class="skeleton">Loading…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _sellables = [], _warehouses = [], _stocks = [], _sales = [];
+let _basket = {};  // sellableId -> { sellable, qty }
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  try {
+    const [sellables, warehouses, stocks, sales, def] = await Promise.all([
+      api.sellables(), api.warehouses(), api.stocks(), api.sales(), api.getDefaultSalesWarehouse()
+    ]);
+    _sellables = sellables; _warehouses = warehouses; _stocks = stocks; _sales = sales;
+    await UI.mountShell("cart");
+
+    document.getElementById("item-pick").innerHTML =
+      `<option value="">Select a menu item…</option>` +
+      sellables.map(s => `<option value="${s.id}">${s.name}${s.selling_price ? " — " + UI.fmtMoney(s.selling_price).replace(/<[^>]+>/g,"") : ""}</option>`).join("");
+
+    const whSel = document.getElementById("sale-wh");
+    whSel.innerHTML = `<option value="">— none —</option>` +
+      warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join("");
+    if (def && def.warehouse) whSel.value = def.warehouse;
+    document.getElementById("no-wh").style.display = (def && def.warehouse) ? "none" : "flex";
+
+    renderBasket();
+    renderHistory();
+  } catch (err) {
+    console.error(err);
+    document.getElementById("history").innerHTML = `<div class="empty">Couldn't load data. Check the console.</div>`;
+  }
+}
+
+async function saveDefaultWh() {
+  const id = document.getElementById("sale-wh").value;
+  try {
+    await api.setDefaultSalesWarehouse(id || null);
+    document.getElementById("no-wh").style.display = id ? "none" : "flex";
+  } catch (e) { console.error(e); }
+}
+
+function addToBasket() {
+  const sel = document.getElementById("item-pick");
+  const id = parseInt(sel.value);
+  sel.value = "";
+  if (!id) return;
+  const s = _sellables.find(x => x.id === id);
+  if (!s) return;
+  if (_basket[id]) _basket[id].qty += 1;
+  else _basket[id] = { sellable: s, qty: 1 };
+  renderBasket();
+}
+
+function setQty(id, q) {
+  q = Math.max(0, parseInt(q) || 0);
+  if (q === 0) delete _basket[id];
+  else if (_basket[id]) _basket[id].qty = q;
+  renderBasket();
+}
+
+function renderBasket() {
+  const el = document.getElementById("basket");
+  const rows = Object.values(_basket);
+  if (!rows.length) { el.innerHTML = `<div class="empty" style="padding:24px">No items yet. Add from the menu above.</div>`; document.getElementById("sale-total").textContent = "0.00"; return; }
+  let total = 0;
+  el.innerHTML = rows.map(({ sellable, qty }) => {
+    const line = (Number(sellable.selling_price) || 0) * qty;
+    total += line;
+    const tag = (sellable.recipe_items && sellable.recipe_items.length)
+      ? '<span class="badge b-ok" style="font-size:10px">tracked</span>'
+      : '<span class="badge b-others" style="font-size:10px">no recipe</span>';
+    return `<div class="basket-row">
+      <div style="flex:1"><span class="strong">${sellable.name}</span> ${tag}</div>
+      <input type="number" min="0" value="${qty}" onchange="setQty(${sellable.id}, this.value)" class="qty-input">
+      <span class="money" style="min-width:70px;text-align:right">${line.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+      <button class="icon-btn del" onclick="setQty(${sellable.id},0)">${UI.ICONS.trash}</button>
+    </div>`;
+  }).join("");
+  document.getElementById("sale-total").textContent = total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+async function record() {
+  const rows = Object.values(_basket);
+  if (!rows.length) return alert("Add at least one item.");
+  const whId = document.getElementById("sale-wh").value;
+  if (!whId) return alert("Pick a warehouse to deduct from (top right).");
+
+  const payload = {
+    warehouse: parseInt(whId),
+    note: document.getElementById("sale-note").value.trim() || null,
+    items: rows.map(({ sellable, qty }) => ({ sellable: sellable.id, quantity: qty })),
+  };
+
+  const btn = document.getElementById("record-btn");
+  btn.disabled = true; btn.textContent = "Recording…";
+  try {
+    await api.recordSale(payload);
+    _basket = {};
+    document.getElementById("sale-note").value = "";
+    [_stocks, _sales] = await Promise.all([api.stocks(), api.sales()]);
+    renderBasket();
+    renderHistory();
+    alert("Sale recorded. Ingredients deducted for tracked items.");
+  } catch (error) {
+    console.error(error);
+    alert(humanizeSaleError(error.message));
+  } finally {
+    btn.disabled = false; btn.textContent = "Record Sale";
+  }
+}
+
+function humanizeSaleError(message) {
+  const raw = (message || "").split(/API \d+:\s*/).pop();
+  try {
+    const obj = JSON.parse(raw);
+    if (obj.shortages) return "Not enough stock:\n\n" + obj.shortages.join("\n");
+    if (obj.detail) return obj.detail;
+    const k = Object.keys(obj)[0];
+    if (k) return `${k}: ${[].concat(obj[k]).join(" ")}`;
+  } catch (_) {}
+  return "Couldn't record the sale. " + raw;
+}
+
+function renderHistory() {
+  const el = document.getElementById("history");
+  if (!_sales.length) { el.innerHTML = `<div class="empty">No sales yet.</div>`; return; }
+  el.innerHTML = _sales.slice(0, 30).map(s => {
+    const items = (s.items || []).map(i => `${UI.fmtQty(i.quantity)}× ${i.sellable_name}`).join(", ");
+    return `<div class="sale-card">
+      <div class="sale-card-head">
+        <span class="strong">${UI.fmtMoney(s.total_price)}</span>
+        <span style="color:var(--ink-3);font-size:12px">${fmtWhen(s.created_at)}</span>
+      </div>
+      <div style="color:var(--ink-2);font-size:13px;margin-top:4px">${items || "—"}</div>
+      ${s.note ? `<div style="color:var(--ink-3);font-size:12px;margin-top:3px">${s.note}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"}) + " " + d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+}
+
+load();
+</script>
+</body>
+</html>

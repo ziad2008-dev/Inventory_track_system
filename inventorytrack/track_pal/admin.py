@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import company, UserProfile, warehouse, product, warehouse_stock, SellableProduct, RecipeItem, InventoryTransaction, StockOrder
+from .models import company, UserProfile, warehouse, product, warehouse_stock, SellableProduct, RecipeItem, InventoryTransaction, StockOrder, Sale, SaleItem
 
 @admin.register(company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -56,3 +56,14 @@ class StockOrderAdmin(admin.ModelAdmin):
     list_display = ('id', 'direction', 'product', 'warehouse', 'quantity', 'status', 'party', 'shipping_method', 'vehicle_count', 'created_at')
     list_filter = ('direction', 'status', 'warehouse')
     search_fields = ('product__name', 'party')
+
+
+class SaleItemInline(admin.TabularInline):
+    model = SaleItem
+    extra = 0
+
+@admin.register(Sale)
+class SaleAdmin(admin.ModelAdmin):
+    list_display = ('id', 'company', 'warehouse', 'total_price', 'created_at', 'created_by')
+    list_filter = ('company', 'warehouse')
+    inlines = [SaleItemInline]

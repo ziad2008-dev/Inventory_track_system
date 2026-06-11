@@ -4,6 +4,9 @@ from django.conf import settings
 class company(models.Model):
     name=models.CharField(max_length=100)
     manager=models.CharField(max_length=100,blank=True,null=True)
+    # which warehouse a quick "Record a Sale" deducts ingredients from
+    default_sales_warehouse=models.ForeignKey('warehouse', on_delete=models.SET_NULL,
+                                              null=True, blank=True, related_name='+')
     created_at=models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -200,3 +203,39 @@ class StockOrder(models.Model):
 
     def __str__(self):
         return f'{self.direction} {self.quantity} {self.product.name} [{self.status}]'
+
+
+class Sale(models.Model):
+    """A recorded sale (e.g. a restaurant order). Holds line items; recording
+    it deducts ingredients for recipe-linked items from one warehouse."""
+    company=models.ForeignKey(company, on_delete=models.CASCADE, related_name='sales')
+    warehouse=models.ForeignKey(warehouse, on_delete=models.SET_NULL, null=True,
+                                related_name='sales', help_text="where ingredients were deducted from")
+    note=models.CharField(max_length=200, blank=True, null=True,
+                          help_text="table number, customer, etc.")
+    total_price=models.DecimalField(max_digits=12, decimal_places=2, default=0,
+                                    help_text="sum of line selling prices")
+    created_at=models.DateTimeField(auto_now_add=True)
+    created_by=models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name='sales_made')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Sale #{self.id} ({self.created_at:%Y-%m-%d})'
+
+
+class SaleItem(models.Model):
+    """One line of a sale: a sellable product and how many were sold.
+    `tracked` records whether stock was actually deducted (False if the item
+    had no recipe)."""
+    sale=models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='items')
+    sellable=models.ForeignKey(SellableProduct, on_delete=models.PROTECT, related_name='sale_items')
+    quantity=models.DecimalField(max_digits=12, decimal_places=2)
+    unit_price=models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True,
+                                   help_text="selling price at time of sale")
+    tracked=models.BooleanField(default=False, help_text="were ingredients deducted?")
+
+    def __str__(self):
+        return f'{self.quantity} x {self.sellable.name}'

@@ -172,6 +172,12 @@ const api = {
   createOrder(d)        { return this._fetch("/api/orders/", { method: "POST", body: JSON.stringify(d) }); },
   setOrderStatus(id, s) { return this._fetch(`/api/orders/${id}/set_status/`, { method: "POST", body: JSON.stringify({ status: s }) }); },
 
+  // ---- Sales (quick record-a-sale) ----
+  sales()               { return this._fetch("/api/sales/"); },
+  recordSale(d)         { return this._fetch("/api/sales/", { method: "POST", body: JSON.stringify(d) }); },
+  getDefaultSalesWarehouse() { return this._fetch("/api/default-sales-warehouse/"); },
+  setDefaultSalesWarehouse(id) { return this._fetch("/api/default-sales-warehouse/", { method: "POST", body: JSON.stringify({ warehouse: id }) }); },
+
   // ---- Sellable products (finished goods with a recipe) ----
   sellables()           { return this._fetch("/api/sellable-products/"); },
   createSellable(d)     { return this._fetch("/api/sellable-products/", { method: "POST", body: JSON.stringify(d) }); },

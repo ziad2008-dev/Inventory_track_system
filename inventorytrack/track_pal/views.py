@@ -1,6 +1,6 @@
 from django.shortcuts import render
-from .models import company, SellableProduct, RecipeItem, warehouse, product, warehouse_stock, InventoryTransaction, StockOrder
-from .serializers import SellableProductSerializer, warehouseSerializer, productSerializer, warehouseStockSerializer, InventoryTransactionSerializer, StockOrderSerializer
+from .models import company, SellableProduct, RecipeItem, warehouse, product, warehouse_stock, InventoryTransaction, StockOrder, Sale, SaleItem
+from .serializers import SellableProductSerializer, warehouseSerializer, productSerializer, warehouseStockSerializer, InventoryTransactionSerializer, StockOrderSerializer, SaleSerializer
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -33,6 +33,9 @@ def me(request):
         "company": comp.name if comp else None,
         "company_id": comp.id if comp else None,
         "manager": comp.manager if comp else None,
+        "default_sales_warehouse": comp.default_sales_warehouse_id if comp else None,
+        "default_sales_warehouse_name": (comp.default_sales_warehouse.name
+                                          if comp and comp.default_sales_warehouse else None),
     })
 
 
@@ -430,6 +433,136 @@ class StockOrderViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(order).data)
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def default_sales_warehouse(request):
+    """GET returns the company's default sales warehouse; POST sets it.
+    Body for POST: { "warehouse": <id> }"""
+    comp = _user_company(request)
+    if comp is None:
+        raise PermissionDenied("Your account isn't linked to a company yet.")
+    if request.method == 'POST':
+        wh_id = request.data.get('warehouse')
+        if wh_id in (None, ''):
+            comp.default_sales_warehouse = None
+        else:
+            try:
+                wh = warehouse.objects.get(id=wh_id, company=comp)
+            except warehouse.DoesNotExist:
+                raise ValidationError("Pick a valid warehouse in your company.")
+            comp.default_sales_warehouse = wh
+        comp.save()
+    return Response({
+        "warehouse": comp.default_sales_warehouse_id,
+        "warehouse_name": comp.default_sales_warehouse.name if comp.default_sales_warehouse else None,
+    })
+
+
+class SaleViewSet(viewsets.ModelViewSet):
+    """Record a sale: a basket of sellable items. For each line, if the item
+    has a recipe, deduct its ingredients (qty x recipe) from the sale warehouse.
+    All-or-nothing: if ANY recipe item is short, nothing is recorded. Items with
+    no recipe are still saved as untracked lines (no stock change)."""
+    serializer_class = SaleSerializer
+
+    def get_queryset(self):
+        comp = _user_company(self.request)
+        if comp is None:
+            return Sale.objects.none()
+        return Sale.objects.filter(company=comp).prefetch_related('items__sellable', 'warehouse')
+
+    def create(self, request, *args, **kwargs):
+        comp = _user_company(request)
+        if comp is None:
+            raise PermissionDenied("Your account isn't linked to a company yet.")
+
+        # resolve warehouse: explicit in body, else company default
+        wh_id = request.data.get('warehouse') or comp.default_sales_warehouse_id
+        if not wh_id:
+            raise ValidationError("No sales warehouse set. Pick one or set a default in Settings.")
+        try:
+            wh = warehouse.objects.get(id=wh_id, company=comp)
+        except warehouse.DoesNotExist:
+            raise ValidationError("Pick a valid warehouse in your company.")
+
+        items = request.data.get('items', []) or []
+        if not items:
+            raise ValidationError("Add at least one item to the sale.")
+
+        # load sellables (company-scoped) with recipes
+        sellable_ids = [it.get('sellable') for it in items]
+        sellables = {s.id: s for s in SellableProduct.objects.filter(
+            id__in=sellable_ids, company=comp).prefetch_related('recipe_items__ingredient')}
+
+        # build required ingredient totals across the whole basket
+        # needed[ingredient_id] = total qty required from this warehouse
+        needed = {}
+        parsed = []  # (sellable, qty, has_recipe)
+        for it in items:
+            sid = it.get('sellable')
+            s = sellables.get(sid)
+            if s is None:
+                raise ValidationError("One of the items isn't a sellable product in your company.")
+            try:
+                qty = Decimal(str(it.get('quantity')))
+            except (TypeError, ValueError, ArithmeticError):
+                raise ValidationError(f"Bad quantity for {s.name}.")
+            if qty <= 0:
+                raise ValidationError(f"Quantity for {s.name} must be greater than zero.")
+            recipe = list(s.recipe_items.all())
+            for ri in recipe:
+                needed[ri.ingredient_id] = needed.get(ri.ingredient_id, Decimal('0')) + Decimal(ri.quantity) * qty
+            parsed.append((s, qty, bool(recipe)))
+
+        with db_transaction.atomic():
+            # 1) check ALL ingredients across the basket, lock rows
+            shortages = []
+            locked = {}
+            for ing_id, need in needed.items():
+                stock = warehouse_stock.objects.select_for_update().filter(
+                    warehouse=wh, product_id=ing_id).first()
+                have = Decimal(stock.quantity) if stock else Decimal('0')
+                if need > have:
+                    ing = product.objects.get(id=ing_id)
+                    shortages.append(f"{ing.name}: need {need} {ing.unit}, have {have}")
+                locked[ing_id] = stock
+            if shortages:
+                raise ValidationError({
+                    "detail": "Not enough stock to record this sale.",
+                    "shortages": shortages,
+                })
+
+            # 2) deduct ingredients + log transactions
+            for ing_id, need in needed.items():
+                stock = locked[ing_id]
+                stock.quantity = Decimal(stock.quantity) - need
+                stock.save()
+                InventoryTransaction.objects.create(
+                    warehouse=wh, product_id=ing_id, quantity=need,
+                    transaction_type='stock_out', note="Sale",
+                    created_by=request.user,
+                )
+
+            # 3) create the sale + line items
+            total = Decimal('0')
+            sale = Sale.objects.create(company=comp, warehouse=wh,
+                                       note=request.data.get('note') or None,
+                                       created_by=request.user)
+            for s, qty, has_recipe in parsed:
+                price = s.selling_price
+                if price is not None:
+                    total += Decimal(price) * qty
+                SaleItem.objects.create(
+                    sale=sale, sellable=s, quantity=qty,
+                    unit_price=price, tracked=has_recipe,
+                )
+            sale.total_price = total
+            sale.save()
+
+        out = self.get_serializer(sale)
+        return Response(out.data, status=status.HTTP_201_CREATED)
+
+
 # ---------------- Template (HTML page) views ----------------
 class LoginTemplateView(TemplateView):
     template_name = 'login.html'
@@ -457,3 +590,6 @@ class TransactionsTemplateView(TemplateView):
 
 class OrdersTemplateView(TemplateView):
     template_name = 'orders.html'
+
+class SalesTemplateView(TemplateView):
+    template_name = 'sales.html'

@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from datetime import date, timedelta
 from .models import (company, SellableProduct, RecipeItem, warehouse,
-                     product, warehouse_stock, InventoryTransaction, StockOrder)
+                     product, warehouse_stock, InventoryTransaction, StockOrder,
+                     Sale, SaleItem)
 
 
 # ---------------------------------------------------------------
@@ -252,3 +253,28 @@ class StockOrderSerializer(serializers.ModelSerializer):
         if value is None or value <= 0:
             raise serializers.ValidationError("Quantity must be greater than zero.")
         return value
+
+
+# ============================================================
+# Sales (quick "record a sale" — restaurant style)
+# ============================================================
+class SaleItemSerializer(serializers.ModelSerializer):
+    sellable_name = serializers.CharField(source='sellable.name', read_only=True)
+
+    class Meta:
+        model = SaleItem
+        fields = ['id', 'sellable', 'sellable_name', 'quantity', 'unit_price', 'tracked']
+        read_only_fields = ['id', 'sellable_name', 'unit_price', 'tracked']
+
+
+class SaleSerializer(serializers.ModelSerializer):
+    items = SaleItemSerializer(many=True, read_only=True)
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = Sale
+        fields = ['id', 'company', 'warehouse', 'warehouse_name', 'note',
+                  'total_price', 'items', 'created_at', 'created_by', 'created_by_username']
+        read_only_fields = ['id', 'company', 'warehouse_name', 'total_price',
+                            'items', 'created_at', 'created_by']
