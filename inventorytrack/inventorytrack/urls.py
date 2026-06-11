@@ -10,6 +10,7 @@ router.register(r'products', views.ProductViewSet, basename='api-product')
 router.register(r'warehouse-stock', views.WarehouseStockViewSet, basename='api-stock')
 router.register(r'sellable-products', views.SellableProductViewSet, basename='api-sellable')
 router.register(r'transactions', views.InventoryTransactionViewSet, basename='api-transaction')
+router.register(r'orders', views.StockOrderViewSet, basename='api-order')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -31,4 +32,5 @@ urlpatterns = [
     path('stock-ui/', views.StockTemplateView.as_view(), name='stock-ui'),
     path('sellable-ui/', views.SellableTemplateView.as_view(), name='sellable-ui'),
     path('transactions-ui/', views.TransactionsTemplateView.as_view(), name='transactions-ui'),
+    path('orders-ui/', views.OrdersTemplateView.as_view(), name='orders-ui'),
 ]
