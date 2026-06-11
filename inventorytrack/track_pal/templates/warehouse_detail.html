@@ -72,7 +72,7 @@ async function load() {
     _rows = stocks;
 
     // total value of this warehouse
-    const total = _rows.reduce((a, s) => a + (s.line_value || 0), 0);
+    const total = _rows.reduce((a, s) => a + Number(s.line_value || 0), 0);
     document.getElementById("wh-value").innerHTML = total
       ? total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : "—";

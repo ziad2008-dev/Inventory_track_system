@@ -72,8 +72,8 @@ function render(warehouses) {
   grid.innerHTML = warehouses.map((w, i) => {
     const recs = _stocks.filter(s => s.warehouse === w.id);
     const products = recs.length;                                  // distinct products in this warehouse
-    const units = recs.reduce((a, s) => a + s.quantity, 0);        // total units on hand
-    const value = recs.reduce((a, s) => a + (s.line_value || 0), 0); // total value
+    const units = recs.reduce((a, s) => a + Number(s.quantity || 0), 0);        // total units on hand
+    const value = recs.reduce((a, s) => a + Number(s.line_value || 0), 0); // total value
     return `
     <a class="wh-card clickable" href="/warehouse/${w.id}/" data-reveal style="animation-delay:${0.05 + i*0.05}s">
       <div class="wh-top">
@@ -84,7 +84,7 @@ function render(warehouses) {
       <div class="wh-loc">${UI.ICONS.pin} ${w.location}</div>
       <div class="wh-meta">
         <div><span class="k">Products</span><span class="v">${products}</span></div>
-        <div><span class="k">Units</span><span class="v">${units.toLocaleString()}</span></div>
+        <div><span class="k">Units</span><span class="v">${units.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
         <div><span class="k">Value</span><span class="v money" style="font-size:18px;padding-top:5px">${value ? value.toLocaleString() : "—"}</span></div>
       </div>
       <div class="wh-cta">View products ${UI.ICONS.chevron}</div>
