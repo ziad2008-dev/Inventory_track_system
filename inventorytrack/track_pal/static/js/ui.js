@@ -19,6 +19,7 @@ const ICONS = {
   tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor"/></svg>',
   swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 10l-4 4 4 4"/><path d="M3 14h14"/><path d="M17 14l4-4-4-4"/><path d="M21 10H7"/></svg>',
   produce: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 20h20M4 20V8l5 3V8l5 3V8l5 3v9"/></svg>',
+  truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
 };
 
 const NAV = [
@@ -28,6 +29,7 @@ const NAV = [
   { href: "/sellable-ui/", key: "tag",       label: "Products for Sale" },
   { href: "/stock-ui/",    key: "stock",     label: "Stock Levels" },
   { href: "/transactions-ui/", key: "swap",  label: "Transactions" },
+  { href: "/orders-ui/",   key: "truck",     label: "Orders" },
 ];
 
 /* Redirect to login if there's no token. Call at the top of every

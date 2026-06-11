@@ -444,3 +444,25 @@ td .strong { color: var(--ink); font-weight: 600; }
 
 /* produce button accent */
 .icon-btn.produce:hover { border-color: var(--teal); color: var(--teal); }
+
+/* ---------- Orders: status + direction badges ---------- */
+.st-pending    { background: #9aa4b220; color: var(--ink-2); }
+.st-in_transit { background: #e8a33d20; color: var(--amber); }
+.st-delivered  { background: #6fcf9720; color: var(--green); }
+.st-cancelled  { background: #e26d6d20; color: var(--red); }
+
+.dir-in  { background: #6fcf9714; color: var(--green); }
+.dir-out { background: #4fd1c514; color: var(--teal); }
+
+.order-stage-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.stage-btn {
+  font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--bg-grad-2); color: var(--ink-2);
+  cursor: pointer; transition: .15s;
+}
+.stage-btn:hover { border-color: var(--amber); color: var(--amber); }
+.stage-btn.deliver:hover { border-color: var(--green); color: var(--green); }
+.stage-btn.cancel:hover { border-color: var(--red); color: var(--red); }
+
+.seg.dir button.active.inc { background: #6fcf9720; color: var(--green); }
+.seg.dir button.active.outg { background: #4fd1c520; color: var(--teal); }

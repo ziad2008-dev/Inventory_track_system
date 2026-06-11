@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from datetime import date, timedelta
 from .models import (company, SellableProduct, RecipeItem, warehouse,
-                     product, warehouse_stock, InventoryTransaction)
+                     product, warehouse_stock, InventoryTransaction, StockOrder)
 
 
 # ---------------------------------------------------------------
@@ -221,6 +221,32 @@ class InventoryTransactionSerializer(serializers.ModelSerializer):
                   'product_unit', 'quantity', 'transaction_type', 'note',
                   'timestamp', 'created_by', 'created_by_username']
         read_only_fields = ['id', 'timestamp', 'created_by']
+
+    def validate_quantity(self, value):
+        if value is None or value <= 0:
+            raise serializers.ValidationError("Quantity must be greater than zero.")
+        return value
+
+
+# ============================================================
+# Stock order (incoming/outgoing with status lifecycle)
+# ============================================================
+class StockOrderSerializer(serializers.ModelSerializer):
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
+    product_name   = serializers.CharField(source='product.name', read_only=True)
+    product_unit   = serializers.CharField(source='product.unit', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = StockOrder
+        fields = ['id', 'company', 'direction', 'warehouse', 'warehouse_name',
+                  'product', 'product_name', 'product_unit', 'quantity',
+                  'status', 'party', 'note', 'stock_applied',
+                  'shipping_method', 'vehicle_type', 'vehicle_count',
+                  'carrier', 'tracking_number', 'estimated_arrival',
+                  'created_at', 'updated_at', 'created_by', 'created_by_username']
+        read_only_fields = ['id', 'company', 'status', 'stock_applied',
+                            'created_at', 'updated_at', 'created_by']
 
     def validate_quantity(self, value):
         if value is None or value <= 0:

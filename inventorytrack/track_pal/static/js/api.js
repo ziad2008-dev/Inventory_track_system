@@ -167,6 +167,11 @@ const api = {
   transactions()        { return this._fetch("/api/transactions/"); },
   createTransaction(d)  { return this._fetch("/api/transactions/", { method: "POST", body: JSON.stringify(d) }); },
 
+  // ---- Stock orders (incoming/outgoing with status) ----
+  orders()              { return this._fetch("/api/orders/"); },
+  createOrder(d)        { return this._fetch("/api/orders/", { method: "POST", body: JSON.stringify(d) }); },
+  setOrderStatus(id, s) { return this._fetch(`/api/orders/${id}/set_status/`, { method: "POST", body: JSON.stringify({ status: s }) }); },
+
   // ---- Sellable products (finished goods with a recipe) ----
   sellables()           { return this._fetch("/api/sellable-products/"); },
   createSellable(d)     { return this._fetch("/api/sellable-products/", { method: "POST", body: JSON.stringify(d) }); },

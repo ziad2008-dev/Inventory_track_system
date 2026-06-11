@@ -140,3 +140,63 @@ class InventoryTransaction(models.Model):
 
     def __str__(self):
         return f'{self.transaction_type} {self.quantity} {self.product.name} @ {self.warehouse.name}'
+
+
+class StockOrder(models.Model):
+    """An incoming (purchase) or outgoing (delivery) order that moves through
+    a status lifecycle. Stock only changes when status becomes 'delivered':
+      incoming delivered -> stock += quantity
+      outgoing delivered -> stock -= quantity (blocked if short)
+    Cancelling a delivered order reverses the stock change.
+    `stock_applied` guards against double-applying."""
+    DIRECTION_CHOICES = [
+        ('incoming', 'Incoming (from supplier)'),
+        ('outgoing', 'Outgoing (to customer)'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('in_transit', 'In Transit'),
+        ('delivered', 'Delivered'),
+        ('cancelled', 'Cancelled'),
+    ]
+    company=models.ForeignKey(company, on_delete=models.CASCADE, related_name='orders')
+    direction=models.CharField(max_length=10, choices=DIRECTION_CHOICES)
+    warehouse=models.ForeignKey(warehouse, on_delete=models.CASCADE, related_name='orders')
+    product=models.ForeignKey(product, on_delete=models.CASCADE, related_name='orders')
+    quantity=models.DecimalField(max_digits=12, decimal_places=2)
+    status=models.CharField(max_length=12, choices=STATUS_CHOICES, default='pending')
+    party=models.CharField(max_length=150, blank=True, null=True,
+                           help_text="supplier name (incoming) or customer name (outgoing)")
+    note=models.CharField(max_length=200, blank=True, null=True)
+
+    # ---- shipping / logistics (descriptive only, no stock effect) ----
+    SHIPPING_METHOD_CHOICES = [
+        ('sea', 'Sea'),
+        ('ground', 'Ground'),
+        ('air', 'Air'),
+    ]
+    VEHICLE_TYPE_CHOICES = [
+        ('truck', 'Truck'),
+        ('ship', 'Ship'),
+        ('plane', 'Plane'),
+        ('container', 'Container'),
+    ]
+    shipping_method=models.CharField(max_length=10, choices=SHIPPING_METHOD_CHOICES, blank=True, null=True)
+    vehicle_type=models.CharField(max_length=12, choices=VEHICLE_TYPE_CHOICES, blank=True, null=True)
+    vehicle_count=models.PositiveIntegerField(blank=True, null=True,
+                                              help_text="number of trucks / ships / containers")
+    carrier=models.CharField(max_length=150, blank=True, null=True, help_text="shipping company")
+    tracking_number=models.CharField(max_length=120, blank=True, null=True)
+    estimated_arrival=models.DateField(blank=True, null=True)
+
+    stock_applied=models.BooleanField(default=False)  # has this order's stock change been applied?
+    created_at=models.DateTimeField(auto_now_add=True)
+    updated_at=models.DateTimeField(auto_now=True)
+    created_by=models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name='orders_created')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.direction} {self.quantity} {self.product.name} [{self.status}]'

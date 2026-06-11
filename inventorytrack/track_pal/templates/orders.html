@@ -1,0 +1,291 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Orders</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Deliveries</div>
+        <h1 class="page-title">Orders</h1>
+        <p class="page-desc">Track incoming and outgoing orders. Stock changes only when an order is marked delivered.</p>
+      </div>
+      <button class="btn btn-primary" data-reveal style="animation-delay:.05s" onclick="openCreate()">
+        <span id="add-icon"></span> New Order
+      </button>
+    </div>
+
+    <div class="panel" data-reveal style="animation-delay:.1s">
+      <div class="panel-head">
+        <h2>All Orders</h2>
+        <div class="panel-tools">
+          <input class="search" id="search" placeholder="Search product or party…" oninput="apply()">
+          <select class="search" id="dir-filter" onchange="apply()" style="min-width:140px">
+            <option value="">All directions</option>
+            <option value="incoming">Incoming</option>
+            <option value="outgoing">Outgoing</option>
+          </select>
+          <select class="search" id="status-filter" onchange="apply()" style="min-width:140px">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="in_transit">In Transit</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+      <div id="table"><div class="skeleton">Loading…</div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Create order modal -->
+<div class="modal-back" id="modal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-head">
+      <h3>New Order</h3>
+      <p>Create an order. It starts as “pending” and only changes stock when you mark it delivered.</p>
+    </div>
+    <div class="modal-body">
+      <div class="seg dir" id="dir-seg" style="margin-bottom:16px">
+        <button class="inc active" data-dir="incoming" onclick="pickDir(this)">Incoming ↓ (from supplier)</button>
+        <button class="outg" data-dir="outgoing" onclick="pickDir(this)">Outgoing ↑ (to customer)</button>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Warehouse</label><select id="f-warehouse"></select></div>
+        <div class="field"><label>Product</label><select id="f-product"></select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Quantity</label><input id="f-qty" type="number" step="0.01" min="0" placeholder="0"></div>
+        <div class="field"><label id="party-label">Supplier name</label><input id="f-party" placeholder="optional"></div>
+      </div>
+      <div class="field"><label>Note (optional)</label><input id="f-note" placeholder="e.g. PO #1234"></div>
+
+      <div class="recipe-head" style="margin-top:6px"><label>Shipping details (optional)</label></div>
+      <div class="field-row">
+        <div class="field">
+          <label>Shipping method</label>
+          <select id="f-method">
+            <option value="">—</option>
+            <option value="sea">Sea</option>
+            <option value="ground">Ground</option>
+            <option value="air">Air</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Vehicle type</label>
+          <select id="f-vehicle">
+            <option value="">—</option>
+            <option value="truck">Truck</option>
+            <option value="ship">Ship</option>
+            <option value="plane">Plane</option>
+            <option value="container">Container</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Number of vehicles/containers</label><input id="f-vcount" type="number" min="0" step="1" placeholder="e.g. 3"></div>
+        <div class="field"><label>Estimated arrival</label><input id="f-eta" type="date"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Carrier / company</label><input id="f-carrier" placeholder="e.g. Maersk"></div>
+        <div class="field"><label>Tracking number</label><input id="f-tracking" placeholder="optional"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="save-btn" onclick="save()">Create Order</button>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _all = [], _warehouses = [], _products = [];
+let _dir = "incoming";
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  try {
+    const [orders, warehouses, products] = await Promise.all([
+      api.orders(), api.warehouses(), api.products()
+    ]);
+    _all = orders; _warehouses = warehouses; _products = products;
+    await UI.mountShell("truck");
+    document.getElementById("add-icon").innerHTML = UI.ICONS.plus;
+    document.getElementById("f-warehouse").innerHTML =
+      warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join("");
+    document.getElementById("f-product").innerHTML =
+      products.map(p => `<option value="${p.id}">${p.name} (${p.unit})</option>`).join("");
+    apply();
+  } catch (err) {
+    console.error(err);
+    document.getElementById("table").innerHTML = `<div class="empty">Couldn't load orders. Check the console.</div>`;
+  }
+}
+
+function dirBadge(d) {
+  return d === "incoming"
+    ? '<span class="badge dir-in">Incoming ↓</span>'
+    : '<span class="badge dir-out">Outgoing ↑</span>';
+}
+function statusBadge(s) {
+  const label = { pending:"Pending", in_transit:"In Transit", delivered:"Delivered", cancelled:"Cancelled" }[s] || s;
+  return `<span class="badge st-${s}">${label}</span>`;
+}
+
+/* compact shipping summary: method icon + vehicle count + ETA */
+const METHOD_LABEL = { sea:"Sea", ground:"Ground", air:"Air" };
+const VEHICLE_LABEL = { truck:"truck", ship:"ship", plane:"plane", container:"container" };
+function shippingCell(o) {
+  const bits = [];
+  if (o.shipping_method) bits.push(`<span class="badge st-in_transit">${METHOD_LABEL[o.shipping_method]}</span>`);
+  if (o.vehicle_count && o.vehicle_type) {
+    bits.push(`${o.vehicle_count} ${VEHICLE_LABEL[o.vehicle_type]}${o.vehicle_count > 1 ? "s" : ""}`);
+  } else if (o.vehicle_type) {
+    bits.push(VEHICLE_LABEL[o.vehicle_type]);
+  }
+  let line = bits.length ? bits.join(" ") : '<span class="muted-dash">—</span>';
+  const sub = [];
+  if (o.carrier) sub.push(o.carrier);
+  if (o.estimated_arrival) sub.push("ETA " + UI.fmtDate(o.estimated_arrival));
+  if (o.tracking_number) sub.push("#" + o.tracking_number);
+  if (sub.length) line += `<br><small style="color:var(--ink-3)">${sub.join(" · ")}</small>`;
+  return line;
+}
+
+/* which stage buttons to show based on current status */
+function stageButtons(o) {
+  const b = [];
+  if (o.status === "pending") {
+    b.push(`<button class="stage-btn" onclick="move(${o.id},'in_transit')">Mark In Transit</button>`);
+    b.push(`<button class="stage-btn deliver" onclick="move(${o.id},'delivered')">Mark Delivered</button>`);
+    b.push(`<button class="stage-btn cancel" onclick="move(${o.id},'cancelled')">Cancel</button>`);
+  } else if (o.status === "in_transit") {
+    b.push(`<button class="stage-btn deliver" onclick="move(${o.id},'delivered')">Mark Delivered</button>`);
+    b.push(`<button class="stage-btn cancel" onclick="move(${o.id},'cancelled')">Cancel</button>`);
+  } else if (o.status === "delivered") {
+    b.push(`<button class="stage-btn cancel" onclick="move(${o.id},'cancelled')">Cancel (reverse stock)</button>`);
+  }
+  // cancelled = no actions
+  return `<div class="order-stage-btns">${b.join("") || '<span class="muted-dash">—</span>'}</div>`;
+}
+
+function apply() {
+  const q = (document.getElementById("search").value || "").toLowerCase();
+  const df = document.getElementById("dir-filter").value;
+  const sf = document.getElementById("status-filter").value;
+  const rows = _all.filter(o =>
+    (!df || o.direction === df) &&
+    (!sf || o.status === sf) &&
+    ((o.product_name || "").toLowerCase().includes(q) || (o.party || "").toLowerCase().includes(q))
+  );
+  const el = document.getElementById("table");
+  if (!rows.length) { el.innerHTML = `<div class="empty">No orders match. Click "New Order" to create one.</div>`; return; }
+  el.innerHTML = `
+    <table><thead><tr>
+      <th>Direction</th><th>Product</th><th>Qty</th><th>Warehouse</th><th>Party</th><th>Shipping</th><th>Status</th><th>Actions</th>
+    </tr></thead><tbody>
+    ${rows.map(o => `
+      <tr>
+        <td>${dirBadge(o.direction)}</td>
+        <td><span class="strong">${o.product_name}</span></td>
+        <td>${UI.fmtQty(o.quantity)} ${o.product_unit || ""}</td>
+        <td>${o.warehouse_name}</td>
+        <td>${o.party || '<span class="muted-dash">—</span>'}</td>
+        <td>${shippingCell(o)}</td>
+        <td>${statusBadge(o.status)}</td>
+        <td>${stageButtons(o)}</td>
+      </tr>`).join("")}
+    </tbody></table>`;
+}
+
+async function move(id, status) {
+  const o = _all.find(x => x.id === id);
+  if (status === "cancelled" && o && o.status === "delivered") {
+    if (!confirm(`This order was already delivered. Cancelling will reverse the stock change for "${o.product_name}". Continue?`)) return;
+  }
+  try {
+    await api.setOrderStatus(id, status);
+    _all = await api.orders();
+    apply();
+  } catch (error) {
+    console.error(error);
+    alert(humanizeError(error.message));
+  }
+}
+
+/* ---------- create ---------- */
+function pickDir(btn) {
+  _dir = btn.dataset.dir;
+  [...document.querySelectorAll("#dir-seg button")].forEach(b => b.classList.toggle("active", b === btn));
+  document.getElementById("party-label").textContent = _dir === "incoming" ? "Supplier name" : "Customer name";
+}
+function openCreate() {
+  _dir = "incoming";
+  [...document.querySelectorAll("#dir-seg button")].forEach((b,i) => b.classList.toggle("active", i === 0));
+  document.getElementById("party-label").textContent = "Supplier name";
+  ["f-qty","f-party","f-note","f-vcount","f-carrier","f-tracking","f-eta"].forEach(id => document.getElementById(id).value = "");
+  ["f-method","f-vehicle"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("modal").classList.add("open");
+}
+function closeModal(){ document.getElementById("modal").classList.remove("open"); }
+
+async function save() {
+  const d = {
+    direction: _dir,
+    warehouse: parseInt(document.getElementById("f-warehouse").value),
+    product: parseInt(document.getElementById("f-product").value),
+    quantity: parseFloat(document.getElementById("f-qty").value) || 0,
+    party: document.getElementById("f-party").value.trim() || null,
+    note: document.getElementById("f-note").value.trim() || null,
+    shipping_method: document.getElementById("f-method").value || null,
+    vehicle_type: document.getElementById("f-vehicle").value || null,
+    vehicle_count: parseInt(document.getElementById("f-vcount").value) || null,
+    carrier: document.getElementById("f-carrier").value.trim() || null,
+    tracking_number: document.getElementById("f-tracking").value.trim() || null,
+    estimated_arrival: document.getElementById("f-eta").value || null,
+  };
+  if (!d.warehouse || !d.product) return alert("Pick a warehouse and product.");
+  if (d.quantity <= 0) return alert("Quantity must be greater than zero.");
+
+  const btn = document.getElementById("save-btn");
+  btn.disabled = true;
+  try {
+    await api.createOrder(d);
+    closeModal();
+    _all = await api.orders();
+    apply();
+  } catch (error) {
+    console.error(error);
+    alert(humanizeError(error.message));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function humanizeError(message) {
+  const raw = (message || "").split(/API \d+:\s*/).pop();
+  try {
+    const obj = JSON.parse(raw);
+    if (obj.detail) return obj.detail;     // "Not enough stock to deliver…"
+    if (Array.isArray(obj)) return obj.join(" ");
+    const k = Object.keys(obj)[0];
+    if (k) return `${k}: ${[].concat(obj[k]).join(" ")}`;
+  } catch (_) {}
+  return "Something went wrong. " + raw;
+}
+
+load();
+</script>
+</body>
+</html>

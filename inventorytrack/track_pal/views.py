@@ -1,6 +1,6 @@
 from django.shortcuts import render
-from .models import company, SellableProduct, RecipeItem, warehouse, product, warehouse_stock, InventoryTransaction
-from .serializers import SellableProductSerializer, warehouseSerializer, productSerializer, warehouseStockSerializer, InventoryTransactionSerializer
+from .models import company, SellableProduct, RecipeItem, warehouse, product, warehouse_stock, InventoryTransaction, StockOrder
+from .serializers import SellableProductSerializer, warehouseSerializer, productSerializer, warehouseStockSerializer, InventoryTransactionSerializer, StockOrderSerializer
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -306,6 +306,130 @@ class InventoryTransactionViewSet(viewsets.ModelViewSet):
         return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
+class StockOrderViewSet(viewsets.ModelViewSet):
+    """Incoming/outgoing orders with a status lifecycle. Stock only moves
+    when an order becomes 'delivered', and reverses if a delivered order
+    is cancelled. All transitions are atomic and logged as transactions."""
+    serializer_class = StockOrderSerializer
+
+    def get_queryset(self):
+        comp = _user_company(self.request)
+        if comp is None:
+            return StockOrder.objects.none()
+        qs = StockOrder.objects.select_related('warehouse', 'product', 'created_by').filter(company=comp)
+        direction = self.request.query_params.get('direction')
+        if direction:
+            qs = qs.filter(direction=direction)
+        return qs
+
+    def perform_create(self, serializer):
+        comp = _user_company(self.request)
+        if comp is None:
+            raise PermissionDenied("Your account isn't linked to a company yet.")
+        wh = serializer.validated_data['warehouse']
+        prod = serializer.validated_data['product']
+        if wh.company_id != comp.id or prod.company_id != comp.id:
+            raise PermissionDenied("Warehouse and product must belong to your company.")
+        # new orders always start pending, stock not yet applied
+        serializer.save(company=comp, created_by=self.request.user,
+                        status='pending', stock_applied=False)
+
+    def _apply_stock(self, order, request):
+        """Apply the order's stock change (called when -> delivered).
+        incoming: +qty, outgoing: -qty (blocked if short). Logs a transaction."""
+        qty = Decimal(order.quantity)
+        with db_transaction.atomic():
+            stock, _ = warehouse_stock.objects.select_for_update().get_or_create(
+                warehouse=order.warehouse, product=order.product, defaults={'quantity': 0}
+            )
+            current = Decimal(stock.quantity)
+            if order.direction == 'incoming':
+                stock.quantity = current + qty
+                ttype = 'stock_in'
+            else:  # outgoing
+                if qty > current:
+                    raise ValidationError(
+                        f"Not enough stock to deliver. {order.product.name} @ "
+                        f"{order.warehouse.name} has {current} {order.product.unit}, "
+                        f"but the order is for {qty}."
+                    )
+                stock.quantity = current - qty
+                ttype = 'stock_out'
+            stock.save()
+            InventoryTransaction.objects.create(
+                warehouse=order.warehouse, product=order.product, quantity=qty,
+                transaction_type=ttype,
+                note=f"Order #{order.id} delivered ({order.direction})",
+                created_by=request.user,
+            )
+            order.stock_applied = True
+            order.status = 'delivered'
+            order.save()
+
+    def _reverse_stock(self, order, request):
+        """Undo a delivered order's stock change (called when delivered -> cancelled).
+        Reverses direction; blocked if it would make stock negative."""
+        qty = Decimal(order.quantity)
+        with db_transaction.atomic():
+            stock, _ = warehouse_stock.objects.select_for_update().get_or_create(
+                warehouse=order.warehouse, product=order.product, defaults={'quantity': 0}
+            )
+            current = Decimal(stock.quantity)
+            if order.direction == 'incoming':
+                # undo an addition -> subtract; block if already used
+                if qty > current:
+                    raise ValidationError(
+                        f"Can't cancel: the received stock has already been used. "
+                        f"{order.product.name} @ {order.warehouse.name} has {current}, "
+                        f"need {qty} to reverse."
+                    )
+                stock.quantity = current - qty
+                ttype = 'stock_out'
+            else:
+                # undo a removal -> add back
+                stock.quantity = current + qty
+                ttype = 'stock_in'
+            stock.save()
+            InventoryTransaction.objects.create(
+                warehouse=order.warehouse, product=order.product, quantity=qty,
+                transaction_type=ttype,
+                note=f"Order #{order.id} cancelled after delivery — reversed",
+                created_by=request.user,
+            )
+            order.stock_applied = False
+            order.status = 'cancelled'
+            order.save()
+
+    @action(detail=True, methods=['post'])
+    def set_status(self, request, pk=None):
+        """Move an order to a new status. Body: { "status": "in_transit" }
+        Applies/reverses stock on the delivered boundary."""
+        comp = _user_company(request)
+        if comp is None:
+            raise PermissionDenied("Your account isn't linked to a company yet.")
+        order = self.get_object()
+        new_status = request.data.get('status')
+        valid = dict(StockOrder.STATUS_CHOICES)
+        if new_status not in valid:
+            raise ValidationError("Invalid status.")
+
+        old_status = order.status
+        if new_status == old_status:
+            return Response(self.get_serializer(order).data)
+
+        # transitions that move stock:
+        if new_status == 'delivered' and not order.stock_applied:
+            self._apply_stock(order, request)          # apply + set delivered
+        elif old_status == 'delivered' and order.stock_applied and new_status == 'cancelled':
+            self._reverse_stock(order, request)         # reverse + set cancelled
+        else:
+            # plain status change (pending/in_transit/cancelled-without-delivery)
+            order.status = new_status
+            order.save()
+
+        return Response(self.get_serializer(order).data)
+
+
 # ---------------- Template (HTML page) views ----------------
 class LoginTemplateView(TemplateView):
     template_name = 'login.html'
@@ -330,3 +454,6 @@ class SellableTemplateView(TemplateView):
 
 class TransactionsTemplateView(TemplateView):
     template_name = 'transactions.html'
+
+class OrdersTemplateView(TemplateView):
+    template_name = 'orders.html'
