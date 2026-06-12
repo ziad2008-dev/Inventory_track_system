@@ -593,3 +593,6 @@ class OrdersTemplateView(TemplateView):
 
 class SalesTemplateView(TemplateView):
     template_name = 'sales.html'
+
+class ExportTemplateView(TemplateView):
+    template_name = 'export.html'

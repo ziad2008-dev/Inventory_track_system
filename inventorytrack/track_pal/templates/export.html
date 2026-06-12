@@ -1,0 +1,180 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Export to Excel</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Reports</div>
+        <h1 class="page-title">Export to Excel</h1>
+        <p class="page-desc">Download your data as an Excel file — for accounting, stock-takes, or your own analysis.</p>
+      </div>
+    </div>
+
+    <div class="panel" data-reveal style="max-width:760px">
+      <div class="panel-head"><h2>Choose what to export</h2></div>
+      <div style="padding:20px 22px">
+        <div class="field-row">
+          <div class="field">
+            <label>Dataset</label>
+            <select id="dataset" onchange="loadPreview()">
+              <option value="stock">Stock Levels</option>
+              <option value="products">Products</option>
+              <option value="transactions">Transactions</option>
+              <option value="sales">Sales</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" id="dl-btn" onclick="download()" style="width:100%;justify-content:center">
+              <span id="dl-icon"></span> Download Excel
+            </button>
+          </div>
+        </div>
+        <div id="count" style="font-size:13px;color:var(--ink-3);margin:6px 0 14px">—</div>
+        <div id="preview"><div class="skeleton">Loading…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+let _rows = [];     // current dataset rows (already shaped for export)
+let _cols = [];     // column headers
+let _meName = "company";
+
+/* Each dataset: fetch fn + a mapper that turns API objects into flat export rows */
+const DATASETS = {
+  stock: {
+    label: "Stock Levels",
+    fetch: () => api.stocks(),
+    columns: ["Product", "SKU", "Warehouse", "Quantity", "Unit", "Line Value", "Alert", "Expiry"],
+    map: s => ({
+      "Product": s.product_name, "SKU": s.product_sku || "", "Warehouse": s.warehouse_name,
+      "Quantity": Number(s.quantity || 0), "Unit": s.product_unit || "",
+      "Line Value": Number(s.line_value || 0),
+      "Alert": s.alert_status || "", "Expiry": s.expiry_status || "",
+    }),
+  },
+  products: {
+    label: "Products",
+    fetch: () => api.products(),
+    columns: ["Name", "SKU", "Unit", "Cost/Unit", "Total Stock", "Total Value", "Min Level", "Alert Level", "Expiry Date"],
+    map: p => ({
+      "Name": p.name, "SKU": p.sku || "", "Unit": p.unit || "",
+      "Cost/Unit": Number(p.pricing || 0), "Total Stock": Number(p.total_stock || 0),
+      "Total Value": Number(p.total_value || 0),
+      "Min Level": p.minimum_stock_level, "Alert Level": p.alert_stock_level,
+      "Expiry Date": p.expiry_date || "",
+    }),
+  },
+  transactions: {
+    label: "Transactions",
+    fetch: () => api.transactions(),
+    columns: ["When", "Type", "Product", "Warehouse", "Quantity", "Unit", "Note", "By"],
+    map: t => ({
+      "When": fmtDateTime(t.timestamp), "Type": t.transaction_type,
+      "Product": t.product_name, "Warehouse": t.warehouse_name,
+      "Quantity": Number(t.quantity || 0), "Unit": t.product_unit || "",
+      "Note": t.note || "", "By": t.created_by_username || "",
+    }),
+  },
+  sales: {
+    label: "Sales",
+    fetch: () => api.sales(),
+    columns: ["When", "Items", "Total", "Warehouse", "Note", "By"],
+    map: s => ({
+      "When": fmtDateTime(s.created_at),
+      "Items": (s.items || []).map(i => `${Number(i.quantity)}x ${i.sellable_name}`).join("; "),
+      "Total": Number(s.total_price || 0), "Warehouse": s.warehouse_name || "",
+      "Note": s.note || "", "By": s.created_by_username || "",
+    }),
+  },
+};
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  const me = await UI.mountShell("download");
+  _meName = (me && me.company) ? me.company : "company";
+  document.getElementById("dl-icon").innerHTML = UI.ICONS.download;
+  loadPreview();
+}
+
+async function loadPreview() {
+  const key = document.getElementById("dataset").value;
+  const ds = DATASETS[key];
+  document.getElementById("preview").innerHTML = `<div class="skeleton">Loading…</div>`;
+  try {
+    const raw = await ds.fetch();
+    _rows = raw.map(ds.map);
+    _cols = ds.columns;
+    document.getElementById("count").textContent = `${_rows.length} row${_rows.length === 1 ? "" : "s"} ready to export.`;
+    renderPreview();
+  } catch (err) {
+    console.error(err);
+    document.getElementById("preview").innerHTML = `<div class="empty">Couldn't load. Check the console.</div>`;
+  }
+}
+
+function renderPreview() {
+  if (!_rows.length) { document.getElementById("preview").innerHTML = `<div class="empty">No data to export.</div>`; return; }
+  const head = _cols.map(c => `<th>${c}</th>`).join("");
+  const body = _rows.slice(0, 8).map(r =>
+    `<tr>${_cols.map(c => `<td>${fmtCell(r[c])}</td>`).join("")}</tr>`
+  ).join("");
+  const more = _rows.length > 8 ? `<div style="padding:10px 14px;color:var(--ink-3);font-size:12px">…and ${_rows.length - 8} more rows in the file</div>` : "";
+  document.getElementById("preview").innerHTML =
+    `<div style="overflow-x:auto"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${more}`;
+}
+
+function fmtCell(v) {
+  if (v === null || v === undefined || v === "") return '<span class="muted-dash">—</span>';
+  if (typeof v === "number") return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return v;
+}
+
+function download() {
+  if (!_rows.length) return alert("Nothing to export.");
+  const key = document.getElementById("dataset").value;
+  const ds = DATASETS[key];
+
+  // build worksheet from array-of-objects, fixed column order
+  const aoa = [_cols, ..._rows.map(r => _cols.map(c => r[c] ?? ""))];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // auto column widths
+  ws["!cols"] = _cols.map((c, i) => {
+    let w = c.length;
+    for (const r of _rows) { const v = String(r[c] ?? ""); if (v.length > w) w = v.length; }
+    return { wch: Math.min(Math.max(w + 2, 8), 40) };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, ds.label.slice(0, 31));
+  const date = new Date().toISOString().slice(0, 10);
+  const safeCompany = _meName.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  XLSX.writeFile(wb, `${safeCompany}-${key}-${date}.xlsx`);
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+load();
+</script>
+</body>
+</html>

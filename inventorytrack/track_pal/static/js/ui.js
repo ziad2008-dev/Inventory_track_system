@@ -21,6 +21,7 @@ const ICONS = {
   produce: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 20h20M4 20V8l5 3V8l5 3V8l5 3v9"/></svg>',
   truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
   cart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="21" r="1.5"/><circle cx="18" cy="21" r="1.5"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
 };
 
 const NAV = [
@@ -32,6 +33,7 @@ const NAV = [
   { href: "/stock-ui/",    key: "stock",     label: "Stock Levels" },
   { href: "/transactions-ui/", key: "swap",  label: "Transactions" },
   { href: "/orders-ui/",   key: "truck",     label: "Orders" },
+  { href: "/export-ui/",   key: "download",  label: "Export to Excel" },
 ];
 
 /* Redirect to login if there's no token. Call at the top of every
