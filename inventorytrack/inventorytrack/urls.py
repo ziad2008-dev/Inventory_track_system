@@ -36,5 +36,6 @@ urlpatterns = [
     path('orders-ui/', views.OrdersTemplateView.as_view(), name='orders-ui'),
     path('sales-ui/', views.SalesTemplateView.as_view(), name='sales-ui'),
     path('export-ui/', views.ExportTemplateView.as_view(), name='export-ui'),
+    path('analytics-ui/', views.AnalyticsTemplateView.as_view(), name='analytics-ui'),
     path('api/default-sales-warehouse/', views.default_sales_warehouse, name='default-sales-warehouse'),
 ]

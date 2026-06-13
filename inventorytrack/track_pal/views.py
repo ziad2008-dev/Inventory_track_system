@@ -596,3 +596,6 @@ class SalesTemplateView(TemplateView):
 
 class ExportTemplateView(TemplateView):
     template_name = 'export.html'
+
+class AnalyticsTemplateView(TemplateView):
+    template_name = 'analytics.html'

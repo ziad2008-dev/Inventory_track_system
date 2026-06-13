@@ -485,3 +485,19 @@ td .strong { color: var(--ink); font-weight: 600; }
 .sale-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 14px; background: var(--bg-grad-2); }
 .sale-card:first-child { margin-top: 14px; }
 .sale-card-head { display: flex; justify-content: space-between; align-items: center; }
+
+/* ---------- Analytics ---------- */
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 22px; }
+@media (max-width: 900px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
+.stat-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+.stat-label { font-size: 12px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em; }
+.stat-value { font-family: var(--display); font-size: 26px; font-weight: 600; color: var(--ink); margin: 6px 0 2px; }
+.stat-sub { font-size: 12px; color: var(--ink-3); }
+
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+.chart-panel .panel-head { padding-bottom: 0; }
+.chart-wide { grid-column: span 2; }
+@media (max-width: 900px) { .chart-wide { grid-column: span 1; } }
+.chart-box { position: relative; height: 280px; padding: 16px 20px 20px; }
+.chart-empty { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; color: var(--ink-3); font-size: 14px; }

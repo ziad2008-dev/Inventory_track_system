@@ -1,0 +1,179 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stockpile — Analytics</title>
+<link rel="stylesheet" href="{% static 'assets/styles.css' %}">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  {% csrf_token %}
+<div class="shell">
+  <div id="sidebar"></div>
+  <main class="main">
+    <div class="topbar">
+      <div data-reveal>
+        <div class="page-kicker">Insights</div>
+        <h1 class="page-title">Analytics</h1>
+        <p class="page-desc">A visual overview of your stock, sales, and movements.</p>
+      </div>
+    </div>
+
+    <!-- top stat strip -->
+    <div class="stat-row" id="stat-row" data-reveal></div>
+
+    <div class="chart-grid">
+      <div class="panel chart-panel" data-reveal>
+        <div class="panel-head"><h2>Stock Value by Warehouse</h2></div>
+        <div class="chart-box"><canvas id="c-warehouse"></canvas><div class="chart-empty" id="e-warehouse"></div></div>
+      </div>
+
+      <div class="panel chart-panel" data-reveal style="animation-delay:.05s">
+        <div class="panel-head"><h2>Stock Alerts</h2></div>
+        <div class="chart-box"><canvas id="c-alerts"></canvas><div class="chart-empty" id="e-alerts"></div></div>
+      </div>
+
+      <div class="panel chart-panel" data-reveal style="animation-delay:.1s">
+        <div class="panel-head"><h2>Expiry Overview</h2></div>
+        <div class="chart-box"><canvas id="c-expiry"></canvas><div class="chart-empty" id="e-expiry"></div></div>
+      </div>
+
+      <div class="panel chart-panel" data-reveal style="animation-delay:.15s">
+        <div class="panel-head"><h2>Stock Movements (In vs Out)</h2></div>
+        <div class="chart-box"><canvas id="c-moves"></canvas><div class="chart-empty" id="e-moves"></div></div>
+      </div>
+
+      <div class="panel chart-panel chart-wide" data-reveal style="animation-delay:.2s">
+        <div class="panel-head"><h2>Sales Over Time</h2></div>
+        <div class="chart-box"><canvas id="c-sales"></canvas><div class="chart-empty" id="e-sales"></div></div>
+      </div>
+
+      <div class="panel chart-panel chart-wide" data-reveal style="animation-delay:.25s">
+        <div class="panel-head"><h2>Top-Selling Items</h2></div>
+        <div class="chart-box"><canvas id="c-top"></canvas><div class="chart-empty" id="e-top"></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="{% static 'js/api.js' %}"></script>
+<script src="{% static 'js/ui.js' %}"></script>
+<script>
+const COL = { amber:"#e8a33d", teal:"#4fd1c5", red:"#e26d6d", green:"#6fcf97",
+              ink2:"#9aa4b2", ink3:"#6f7a87", line:"#2a313c" };
+
+function num(v){ return Number(v||0); }
+function showEmpty(id){ document.getElementById("e-"+id).textContent = "No data yet."; document.getElementById("e-"+id).style.display="flex"; }
+
+// Chart.js global theming for dark slate
+function applyTheme(){
+  if (!window.Chart) return;
+  Chart.defaults.color = COL.ink2;
+  Chart.defaults.borderColor = COL.line;
+  Chart.defaults.font.family = "Archivo, system-ui, sans-serif";
+}
+
+async function load() {
+  if (!UI.requireAuth()) return;
+  await UI.mountShell("chart");
+  applyTheme();
+  try {
+    const [stocks, txns, sales] = await Promise.all([api.stocks(), api.transactions(), api.sales()]);
+    renderStats(stocks, sales);
+    chartWarehouse(stocks);
+    chartAlerts(stocks);
+    chartExpiry(stocks);
+    chartMoves(txns);
+    chartSales(sales);
+    chartTop(sales);
+  } catch (err) {
+    console.error(err);
+    document.getElementById("stat-row").innerHTML = `<div class="empty">Couldn't load analytics. Check the console.</div>`;
+  }
+}
+
+function renderStats(stocks, sales) {
+  const totalValue = stocks.reduce((a,s)=>a+num(s.line_value),0);
+  const totalUnits = stocks.reduce((a,s)=>a+num(s.quantity),0);
+  const critical = stocks.filter(s=>s.alert_status==="critical").length;
+  const salesTotal = sales.reduce((a,s)=>a+num(s.total_price),0);
+  const cards = [
+    { label:"Total Stock Value", value: UI.fmtMoney(totalValue), sub:"EGP" },
+    { label:"Total Units", value: totalUnits.toLocaleString(undefined,{maximumFractionDigits:0}), sub:"in stock" },
+    { label:"Critical Items", value: critical, sub:"need restock", warn: critical>0 },
+    { label:"Sales Recorded", value: UI.fmtMoney(salesTotal), sub:`${sales.length} sales` },
+  ];
+  document.getElementById("stat-row").innerHTML = cards.map(c=>`
+    <div class="stat-card">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value" style="${c.warn?'color:var(--red)':''}">${c.value}</div>
+      <div class="stat-sub">${c.sub}</div>
+    </div>`).join("");
+}
+
+function mk(id, config){
+  const ctx = document.getElementById(id);
+  if (!ctx || !window.Chart) return;
+  new Chart(ctx, config);
+}
+
+function chartWarehouse(stocks){
+  const by = {};
+  stocks.forEach(s=>{ by[s.warehouse_name]=(by[s.warehouse_name]||0)+num(s.line_value); });
+  const labels=Object.keys(by); if(!labels.length) return showEmpty("warehouse");
+  mk("c-warehouse",{ type:"bar", data:{ labels, datasets:[{ data:labels.map(l=>by[l]), backgroundColor:COL.amber, borderRadius:6 }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, grid:{color:COL.line} }, x:{ grid:{display:false} } }, maintainAspectRatio:false } });
+}
+
+function chartAlerts(stocks){
+  const c={healthy:0,low:0,critical:0};
+  stocks.forEach(s=>{ if(c[s.alert_status]!==undefined)c[s.alert_status]++; });
+  if(!(c.healthy+c.low+c.critical)) return showEmpty("alerts");
+  mk("c-alerts",{ type:"doughnut", data:{ labels:["Healthy","Low","Critical"],
+    datasets:[{ data:[c.healthy,c.low,c.critical], backgroundColor:[COL.green,COL.amber,COL.red], borderColor:"#12161c", borderWidth:2 }]},
+    options:{ plugins:{legend:{position:"bottom"}}, cutout:"62%", maintainAspectRatio:false } });
+}
+
+function chartExpiry(stocks){
+  const c={ok:0,expiring_soon:0,expired:0};
+  stocks.forEach(s=>{ if(c[s.expiry_status]!==undefined)c[s.expiry_status]++; });
+  if(!(c.ok+c.expiring_soon+c.expired)) return showEmpty("expiry");
+  mk("c-expiry",{ type:"doughnut", data:{ labels:["OK","Expiring Soon","Expired"],
+    datasets:[{ data:[c.ok,c.expiring_soon,c.expired], backgroundColor:[COL.teal,COL.amber,COL.red], borderColor:"#12161c", borderWidth:2 }]},
+    options:{ plugins:{legend:{position:"bottom"}}, cutout:"62%", maintainAspectRatio:false } });
+}
+
+function chartMoves(txns){
+  if(!txns.length) return showEmpty("moves");
+  let inn=0,out=0,adj=0;
+  txns.forEach(t=>{ const q=num(t.quantity); if(t.transaction_type==="stock_in")inn+=q; else if(t.transaction_type==="stock_out")out+=q; else adj+=q; });
+  mk("c-moves",{ type:"bar", data:{ labels:["Stock In","Stock Out","Adjustments"],
+    datasets:[{ data:[inn,out,adj], backgroundColor:[COL.green,COL.red,COL.teal], borderRadius:6 }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, grid:{color:COL.line} }, x:{ grid:{display:false} } }, maintainAspectRatio:false } });
+}
+
+function chartSales(sales){
+  if(!sales.length) return showEmpty("sales");
+  const by={};
+  sales.forEach(s=>{ const d=(s.created_at||"").slice(0,10); by[d]=(by[d]||0)+num(s.total_price); });
+  const labels=Object.keys(by).sort();
+  mk("c-sales",{ type:"line", data:{ labels, datasets:[{ data:labels.map(l=>by[l]),
+    borderColor:COL.amber, backgroundColor:"rgba(232,163,61,.12)", fill:true, tension:.3, pointRadius:3, pointBackgroundColor:COL.amber }]},
+    options:{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, grid:{color:COL.line} }, x:{ grid:{display:false} } }, maintainAspectRatio:false } });
+}
+
+function chartTop(sales){
+  const by={};
+  sales.forEach(s=>(s.items||[]).forEach(i=>{ by[i.sellable_name]=(by[i.sellable_name]||0)+num(i.quantity); }));
+  const entries=Object.entries(by).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  if(!entries.length) return showEmpty("top");
+  mk("c-top",{ type:"bar", data:{ labels:entries.map(e=>e[0]), datasets:[{ data:entries.map(e=>e[1]), backgroundColor:COL.teal, borderRadius:6 }]},
+    options:{ indexAxis:"y", plugins:{legend:{display:false}}, scales:{ x:{ beginAtZero:true, grid:{color:COL.line} }, y:{ grid:{display:false} } }, maintainAspectRatio:false } });
+}
+
+load();
+</script>
+</body>
+</html>
