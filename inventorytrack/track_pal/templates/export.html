@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stockpile — Export to Excel</title>
 <link rel="stylesheet" href="{% static 'assets/styles.css' %}">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 </head>
 <body>
   {% csrf_token %}
@@ -60,18 +60,20 @@ const DATASETS = {
   stock: {
     label: "Stock Levels",
     fetch: () => api.stocks(),
-    columns: ["Product", "SKU", "Warehouse", "Quantity", "Unit", "Line Value", "Alert", "Expiry"],
+    columns: ["Product", "SKU", "Warehouse", "Quantity", "Unit", "Line Value (EGP)", "Alert Status", "Expiry Status"],
+    money: ["Line Value (EGP)"],
     map: s => ({
       "Product": s.product_name, "SKU": s.product_sku || "", "Warehouse": s.warehouse_name,
       "Quantity": Number(s.quantity || 0), "Unit": s.product_unit || "",
-      "Line Value": Number(s.line_value || 0),
-      "Alert": s.alert_status || "", "Expiry": s.expiry_status || "",
+      "Line Value (EGP)": Number(s.line_value || 0),
+      "Alert Status": s.alert_status || "", "Expiry Status": s.expiry_status || "",
     }),
   },
   products: {
     label: "Products",
     fetch: () => api.products(),
     columns: ["Name", "SKU", "Unit", "Cost/Unit", "Total Stock", "Total Value", "Min Level", "Alert Level", "Expiry Date"],
+    money: ["Cost/Unit", "Total Value"],
     map: p => ({
       "Name": p.name, "SKU": p.sku || "", "Unit": p.unit || "",
       "Cost/Unit": Number(p.pricing || 0), "Total Stock": Number(p.total_stock || 0),
@@ -84,6 +86,7 @@ const DATASETS = {
     label: "Transactions",
     fetch: () => api.transactions(),
     columns: ["When", "Type", "Product", "Warehouse", "Quantity", "Unit", "Note", "By"],
+    money: [],
     map: t => ({
       "When": fmtDateTime(t.timestamp), "Type": t.transaction_type,
       "Product": t.product_name, "Warehouse": t.warehouse_name,
@@ -95,6 +98,7 @@ const DATASETS = {
     label: "Sales",
     fetch: () => api.sales(),
     columns: ["When", "Items", "Total", "Warehouse", "Note", "By"],
+    money: ["Total"],
     map: s => ({
       "When": fmtDateTime(s.created_at),
       "Items": (s.items || []).map(i => `${Number(i.quantity)}x ${i.sellable_name}`).join("; "),
@@ -145,27 +149,73 @@ function fmtCell(v) {
   return v;
 }
 
-function download() {
+async function download() {
   if (!_rows.length) return alert("Nothing to export.");
   const key = document.getElementById("dataset").value;
   const ds = DATASETS[key];
+  const money = ds.money || [];
 
-  // build worksheet from array-of-objects, fixed column order
-  const aoa = [_cols, ..._rows.map(r => _cols.map(c => r[c] ?? ""))];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(ds.label.slice(0, 31));
 
-  // auto column widths
-  ws["!cols"] = _cols.map((c, i) => {
-    let w = c.length;
-    for (const r of _rows) { const v = String(r[c] ?? ""); if (v.length > w) w = v.length; }
-    return { wch: Math.min(Math.max(w + 2, 8), 40) };
+  // header row
+  ws.addRow(_cols);
+  const header = ws.getRow(1);
+  header.height = 22;
+  header.eachCell(cell => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Calibri" };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4472C4" } }; // Excel table blue
+    cell.alignment = { vertical: "middle", horizontal: "left" };
+    cell.border = { bottom: { style: "thin", color: { argb: "FF2F528F" } } };
   });
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, ds.label.slice(0, 31));
+  // data rows with zebra striping + conditional red fills
+  const stripe = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } }; // light blue
+  const red = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8D7DA" } };    // light red
+  const alertCol = _cols.indexOf("Alert Status");
+  const expiryCol = _cols.indexOf("Expiry Status");
+
+  _rows.forEach((r, idx) => {
+    const row = ws.addRow(_cols.map(c => r[c] ?? ""));
+    const banded = idx % 2 === 1;
+    row.eachCell((cell, colNumber) => {
+      if (banded) cell.fill = stripe;
+      cell.font = { name: "Calibri" };
+      const colName = _cols[colNumber - 1];
+      if (money.includes(colName)) cell.numFmt = '#,##0.00';
+      cell.alignment = { vertical: "middle" };
+    });
+    // conditional red overrides stripe
+    if (alertCol >= 0) {
+      const v = r["Alert Status"];
+      if (v === "low" || v === "critical") row.getCell(alertCol + 1).fill = red;
+    }
+    if (expiryCol >= 0) {
+      const v = r["Expiry Status"];
+      if (v === "expiring_soon" || v === "expired") row.getCell(expiryCol + 1).fill = red;
+    }
+  });
+
+  // column widths
+  _cols.forEach((c, i) => {
+    let w = c.length;
+    for (const r of _rows) { const v = String(r[c] ?? ""); if (v.length > w) w = v.length; }
+    ws.getColumn(i + 1).width = Math.min(Math.max(w + 2, 9), 42);
+  });
+
+  // filter dropdowns on header + freeze it
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: _cols.length } };
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+
   const date = new Date().toISOString().slice(0, 10);
   const safeCompany = _meName.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  XLSX.writeFile(wb, `${safeCompany}-${key}-${date}.xlsx`);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `${safeCompany}-${key}-${date}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function fmtDateTime(iso) {
