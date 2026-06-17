@@ -5,7 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.decorators import api_view, permission_classes, action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission, SAFE_METHODS
 from django.views.generic import TemplateView
 from django.db import transaction as db_transaction
 from decimal import Decimal
@@ -20,11 +20,43 @@ def _user_company(request):
     return profile.company if profile else None
 
 
+def _user_role(request):
+    """Return the logged-in user's role ('owner'|'manager'|'employee') or None."""
+    user = request.user
+    if not user.is_authenticated:
+        return None
+    profile = getattr(user, 'profile', None)
+    return profile.role if profile else None
+
+
+class IsManagerOrReadOnly(BasePermission):
+    """Everyone authenticated can read (GET/HEAD/OPTIONS).
+    Only managers and owners can write (POST/PUT/PATCH/DELETE).
+    Employees are blocked from writes."""
+    message = "Your role doesn't allow this action. Ask a manager or owner."
+
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return _user_role(request) in ('owner', 'manager')
+
+
+class IsOwner(BasePermission):
+    """Only owners. Used for user-management actions (Phase 2)."""
+    message = "Only the owner can do this."
+
+    def has_permission(self, request, view):
+        return _user_role(request) == 'owner'
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me(request):
     user = request.user
     comp = _user_company(request)
+    profile = getattr(user, 'profile', None)
     display_name = (user.get_full_name() or "").strip() or user.username
     return Response({
         "username": user.username,
@@ -33,6 +65,8 @@ def me(request):
         "company": comp.name if comp else None,
         "company_id": comp.id if comp else None,
         "manager": comp.manager if comp else None,
+        "role": profile.role if profile else None,
+        "must_change_password": profile.must_change_password if profile else False,
         "default_sales_warehouse": comp.default_sales_warehouse_id if comp else None,
         "default_sales_warehouse_name": (comp.default_sales_warehouse.name
                                           if comp and comp.default_sales_warehouse else None),
@@ -40,6 +74,7 @@ def me(request):
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsManagerOrReadOnly]
     serializer_class = warehouseSerializer
 
     def get_queryset(self):
@@ -62,6 +97,7 @@ class WarehouseViewSet(viewsets.ModelViewSet):
 
 
 class ProductViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsManagerOrReadOnly]
     serializer_class = productSerializer
 
     def get_queryset(self):
@@ -106,6 +142,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class WarehouseStockViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsManagerOrReadOnly]
     serializer_class = warehouseStockSerializer
 
     def get_queryset(self):
@@ -122,6 +159,7 @@ class WarehouseStockViewSet(viewsets.ModelViewSet):
 
 
 class SellableProductViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsManagerOrReadOnly]
     serializer_class = SellableProductSerializer
 
     def get_queryset(self):
@@ -246,6 +284,7 @@ class SellableProductViewSet(viewsets.ModelViewSet):
 
 
 class InventoryTransactionViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsManagerOrReadOnly]
     """Records a stock movement AND applies it to warehouse_stock atomically.
       stock_in   -> stock += quantity
       stock_out  -> stock -= quantity   (blocked if not enough)
@@ -310,6 +349,7 @@ class InventoryTransactionViewSet(viewsets.ModelViewSet):
 
 
 class StockOrderViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsManagerOrReadOnly]
     """Incoming/outgoing orders with a status lifecycle. Stock only moves
     when an order becomes 'delivered', and reverses if a delivered order
     is cancelled. All transitions are atomic and logged as transactions."""

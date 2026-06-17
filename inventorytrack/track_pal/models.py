@@ -14,11 +14,20 @@ class company(models.Model):
 
 
 class UserProfile(models.Model):
+    ROLE_CHOICES = [
+        ('owner', 'Owner'),
+        ('manager', 'Manager'),
+        ('employee', 'Employee'),
+    ]
     user=models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
     company=models.ForeignKey(company, on_delete=models.CASCADE, related_name='members')
+    # default 'owner' so existing users keep full access after the migration
+    role=models.CharField(max_length=10, choices=ROLE_CHOICES, default='owner')
+    # forces a password change on first login (used for employee accounts)
+    must_change_password=models.BooleanField(default=False)
 
     def __str__(self):
-        return f'{self.user.username} → {self.company.name}'
+        return f'{self.user.username} → {self.company.name} ({self.role})'
 
 
 class warehouse(models.Model):

@@ -27,16 +27,21 @@ const ICONS = {
 
 const NAV = [
   { href: "/dashboard/",   key: "dash",      label: "Dashboard" },
-  { href: "/analytics-ui/", key: "chart",    label: "Analytics" },
+  { href: "/analytics-ui/", key: "chart",    label: "Analytics", managerOnly: true },
   { href: "/warehouses/",  key: "warehouse", label: "Warehouses" },
   { href: "/products-ui/", key: "box",       label: "Products" },
   { href: "/sellable-ui/", key: "tag",       label: "Products for Sale" },
   { href: "/sales-ui/",    key: "cart",      label: "Record a Sale" },
   { href: "/stock-ui/",    key: "stock",     label: "Stock Levels" },
-  { href: "/transactions-ui/", key: "swap",  label: "Transactions" },
-  { href: "/orders-ui/",   key: "truck",     label: "Orders" },
+  { href: "/transactions-ui/", key: "swap",  label: "Transactions", managerOnly: true },
+  { href: "/orders-ui/",   key: "truck",     label: "Orders", managerOnly: true },
   { href: "/export-ui/",   key: "download",  label: "Export to Excel" },
 ];
+
+// current user's role, set on mountShell; null until loaded
+let _role = null;
+function canManage() { return _role === "owner" || _role === "manager"; }
+function isOwner() { return _role === "owner"; }
 
 /* Redirect to login if there's no token. Call at the top of every
    protected page's load(). Returns false if it redirected. */
@@ -49,12 +54,17 @@ function requireAuth() {
 }
 
 function renderShell(active, me) {
-  const links = NAV.map(n =>
-    `<a href="${n.href}" class="${n.key === active ? "active" : ""}">${ICONS[n.key]}<span>${n.label}</span></a>`
-  ).join("");
+  const role = me?.role || null;
+  const canMng = role === "owner" || role === "manager";
+  const links = NAV
+    .filter(n => !n.managerOnly || canMng)
+    .map(n =>
+      `<a href="${n.href}" class="${n.key === active ? "active" : ""}">${ICONS[n.key]}<span>${n.label}</span></a>`
+    ).join("");
 
   const displayName = me?.name || me?.username || "User";
   const companyName = me?.company || "Stockpile";
+  const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "";
 
   return `
   <aside class="sidebar">
@@ -72,7 +82,7 @@ function renderShell(active, me) {
         <div class="avatar">${displayName.slice(0,1).toUpperCase()}</div>
         <div style="flex:1; min-width:0">
           <div style="font-size:13px;font-weight:600">${displayName}</div>
-          <small>${companyName}</small>
+          <small>${companyName}${roleLabel ? " · " + roleLabel : ""}</small>
         </div>
       </div>
       <button class="logout-btn" onclick="api.logout()">${ICONS.logout}<span>Sign out</span></button>
@@ -85,6 +95,9 @@ function renderShell(active, me) {
 async function mountShell(active) {
   let me = null;
   try { me = await api.me(); } catch (_) {}
+  _role = me?.role || null;
+  // tag the body so pages can hide manager-only buttons via CSS
+  if (!canManage()) document.body.classList.add("role-employee");
   document.getElementById("sidebar").innerHTML = renderShell(active, me);
   return me;
 }
@@ -174,4 +187,4 @@ function buildBanners(stockRows) {
   return parts.length ? `<div class="banner-stack">${parts.join("")}</div>` : "";
 }
 
-window.UI = { ICONS, renderShell, mountShell, greeting, requireAuth, badgeFor, fmtDate, fmtMoney, fmtQty, alertChip, expiryChip, stockState, buildBanners };
+window.UI = { ICONS, renderShell, mountShell, greeting, requireAuth, badgeFor, fmtDate, fmtMoney, fmtQty, alertChip, expiryChip, stockState, buildBanners, canManage, isOwner };
