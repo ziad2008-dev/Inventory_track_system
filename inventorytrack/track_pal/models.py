@@ -90,18 +90,12 @@ class warehouse_stock(models.Model):
         return f'{self.product.name} @ {self.warehouse.name}: {self.quantity}'
 
 
-# ============================================================
-# Sellable product (finished good) + its recipe of raw materials
-# Cost is computed live from each ingredient's product.pricing.
-# ============================================================
 class SellableProduct(models.Model):
     company=models.ForeignKey(company, on_delete=models.CASCADE, related_name='sellable_products')
     name=models.CharField(max_length=100)
     sku=models.CharField(max_length=100, blank=True, null=True)
     selling_price=models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True,
                                        help_text="price you sell this finished product for")
-    # The stockable product that represents this finished good. Auto-created
-    # so producing a batch can add finished units to warehouse stock.
     finished_product=models.OneToOneField('product', on_delete=models.SET_NULL,
                                            null=True, blank=True, related_name='sellable_source')
     created_at=models.DateTimeField(auto_now_add=True)
@@ -181,7 +175,6 @@ class StockOrder(models.Model):
                            help_text="supplier name (incoming) or customer name (outgoing)")
     note=models.CharField(max_length=200, blank=True, null=True)
 
-    # ---- shipping / logistics (descriptive only, no stock effect) ----
     SHIPPING_METHOD_CHOICES = [
         ('sea', 'Sea'),
         ('ground', 'Ground'),

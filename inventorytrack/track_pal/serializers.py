@@ -5,9 +5,6 @@ from .models import (company, SellableProduct, RecipeItem, warehouse,
                      Sale, SaleItem)
 
 
-# ---------------------------------------------------------------
-# Warehouse
-# ---------------------------------------------------------------
 class warehouseSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
     created_by_username = serializers.CharField(source='created_by.username', read_only=True)
@@ -19,9 +16,6 @@ class warehouseSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'company', 'created_by', 'created_at']
 
 
-# ---------------------------------------------------------------
-# Product  (all computed fields read-only; every Decimal wrapped in float)
-# ---------------------------------------------------------------
 class productSerializer(serializers.ModelSerializer):
     total_stock    = serializers.SerializerMethodField()
     total_value    = serializers.SerializerMethodField()
@@ -64,9 +58,6 @@ class productSerializer(serializers.ModelSerializer):
         return 'ok'
 
 
-# ---------------------------------------------------------------
-# Warehouse stock (one product's quantity in one warehouse)
-# ---------------------------------------------------------------
 class warehouseStockSerializer(serializers.ModelSerializer):
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
     product_name   = serializers.CharField(source='product.name', read_only=True)
@@ -118,9 +109,6 @@ class warehouseStockSerializer(serializers.ModelSerializer):
         return round(float(obj.product.pricing) * float(obj.quantity), 2)
 
 
-# ============================================================
-# Sellable product (finished good) with recipe + live costing
-# ============================================================
 class RecipeItemSerializer(serializers.ModelSerializer):
     ingredient_name  = serializers.CharField(source='ingredient.name', read_only=True)
     ingredient_unit  = serializers.CharField(source='ingredient.unit', read_only=True)
@@ -180,8 +168,6 @@ class SellableProductSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items = validated_data.pop('recipe_items', [])
         sellable = SellableProduct.objects.create(**validated_data)
-        # auto-create a stockable product to represent this finished good,
-        # so production can add finished units to warehouse stock
         comp = sellable.company
         fp = product.objects.create(
             company=comp,
@@ -207,9 +193,6 @@ class SellableProductSerializer(serializers.ModelSerializer):
         return instance
 
 
-# ============================================================
-# Inventory transaction (stock movement)
-# ============================================================
 class InventoryTransactionSerializer(serializers.ModelSerializer):
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
     product_name   = serializers.CharField(source='product.name', read_only=True)
@@ -229,9 +212,6 @@ class InventoryTransactionSerializer(serializers.ModelSerializer):
         return value
 
 
-# ============================================================
-# Stock order (incoming/outgoing with status lifecycle)
-# ============================================================
 class StockOrderSerializer(serializers.ModelSerializer):
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
     product_name   = serializers.CharField(source='product.name', read_only=True)
@@ -255,9 +235,6 @@ class StockOrderSerializer(serializers.ModelSerializer):
         return value
 
 
-# ============================================================
-# Sales (quick "record a sale" — restaurant style)
-# ============================================================
 class SaleItemSerializer(serializers.ModelSerializer):
     sellable_name = serializers.CharField(source='sellable.name', read_only=True)
 

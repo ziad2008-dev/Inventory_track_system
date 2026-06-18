@@ -10,23 +10,17 @@ import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# ---------------------------------------------------------------------
-# Security
-# ---------------------------------------------------------------------
-# In production set SECRET_KEY as a Railway environment variable.
+
 SECRET_KEY = os.environ.get(
     'SECRET_KEY',
     'django-insecure-m*4**a)9z!++_ge%cpoa_w645wxhq=_@le18lv88yk7^e+_d$t'
 )
 
-# DEBUG is False in production. Set DEBUG=True locally via env var if you want.
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-# Railway serves your app on a *.up.railway.app domain. "*" is simplest to
-# start; tighten to your real domain later.
+
 ALLOWED_HOSTS = ['*']
 
-# Needed so DRF/JWT POSTs (login, create, etc.) aren't blocked by CSRF in prod.
 CSRF_TRUSTED_ORIGINS = [
     'https://*.up.railway.app',
 ]
@@ -48,7 +42,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',          # serves static files in production
+    'whitenoise.middleware.WhiteNoiseMiddleware',          
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -77,11 +71,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'inventorytrack.wsgi.application'
 
 
-# ---------------------------------------------------------------------
-# Database
-# Uses Railway's DATABASE_URL automatically when present; otherwise falls
-# back to your local PostgreSQL settings.
-# ---------------------------------------------------------------------
+
 DATABASES = {
     'default': dj_database_url.config(
         default=os.environ.get(
@@ -99,9 +89,7 @@ DATABASES = {
 }
 
 
-# ---------------------------------------------------------------------
-# Password validation
-# ---------------------------------------------------------------------
+
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -110,18 +98,12 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
-# ---------------------------------------------------------------------
-# Internationalization
-# ---------------------------------------------------------------------
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
 
-# ---------------------------------------------------------------------
-# Static files (CSS, JavaScript) — served by WhiteNoise in production
-# ---------------------------------------------------------------------
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
@@ -137,9 +119,6 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# ---------------------------------------------------------------------
-# Django REST Framework + JWT
-# ---------------------------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',

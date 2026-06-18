@@ -207,7 +207,7 @@ class SellableProductViewSet(viewsets.ModelViewSet):
         if comp is None:
             raise PermissionDenied("Your account isn't linked to a company yet.")
 
-        sellable = self.get_object()  # already company-scoped by get_queryset
+        sellable = self.get_object()  
 
         wh_id = request.data.get('warehouse')
         try:
@@ -227,7 +227,7 @@ class SellableProductViewSet(viewsets.ModelViewSet):
             raise ValidationError("This product has no recipe, so nothing can be produced.")
 
         with db_transaction.atomic():
-            # 1) check every ingredient has enough, lock the rows
+            
             shortages = []
             stock_rows = {}
             for item in recipe:
@@ -248,7 +248,6 @@ class SellableProductViewSet(viewsets.ModelViewSet):
                     "shortages": shortages,
                 })
 
-            # 2) deduct ingredients + log stock_out
             for item in recipe:
                 stock, needed = stock_rows[item.ingredient.id]
                 stock.quantity = Decimal(stock.quantity) - needed
@@ -260,7 +259,6 @@ class SellableProductViewSet(viewsets.ModelViewSet):
                     created_by=request.user,
                 )
 
-            # 3) add finished goods to stock + log stock_in
             fp = sellable.finished_product
             if fp is not None:
                 fstock, _ = warehouse_stock.objects.select_for_update().get_or_create(
@@ -317,11 +315,9 @@ class InventoryTransactionViewSet(viewsets.ModelViewSet):
         qty = Decimal(serializer.validated_data['quantity'])
         ttype = serializer.validated_data['transaction_type']
 
-        # both warehouse and product must belong to the user's company
         if wh.company_id != comp.id or prod.company_id != comp.id:
             raise PermissionDenied("Warehouse and product must belong to your company.")
 
-        # everything (stock update + log row) succeeds or fails together
         with db_transaction.atomic():
             stock, _ = warehouse_stock.objects.select_for_update().get_or_create(
                 warehouse=wh, product=prod, defaults={'quantity': 0}
@@ -429,7 +425,6 @@ class StockOrderViewSet(viewsets.ModelViewSet):
                 stock.quantity = current - qty
                 ttype = 'stock_out'
             else:
-                # undo a removal -> add back
                 stock.quantity = current + qty
                 ttype = 'stock_in'
             stock.save()
@@ -462,11 +457,10 @@ class StockOrderViewSet(viewsets.ModelViewSet):
 
         # transitions that move stock:
         if new_status == 'delivered' and not order.stock_applied:
-            self._apply_stock(order, request)          # apply + set delivered
+            self._apply_stock(order, request)         
         elif old_status == 'delivered' and order.stock_applied and new_status == 'cancelled':
-            self._reverse_stock(order, request)         # reverse + set cancelled
+            self._reverse_stock(order, request)         
         else:
-            # plain status change (pending/in_transit/cancelled-without-delivery)
             order.status = new_status
             order.save()
 
@@ -516,7 +510,6 @@ class SaleViewSet(viewsets.ModelViewSet):
         if comp is None:
             raise PermissionDenied("Your account isn't linked to a company yet.")
 
-        # resolve warehouse: explicit in body, else company default
         wh_id = request.data.get('warehouse') or comp.default_sales_warehouse_id
         if not wh_id:
             raise ValidationError("No sales warehouse set. Pick one or set a default in Settings.")
@@ -534,10 +527,8 @@ class SaleViewSet(viewsets.ModelViewSet):
         sellables = {s.id: s for s in SellableProduct.objects.filter(
             id__in=sellable_ids, company=comp).prefetch_related('recipe_items__ingredient')}
 
-        # build required ingredient totals across the whole basket
-        # needed[ingredient_id] = total qty required from this warehouse
         needed = {}
-        parsed = []  # (sellable, qty, has_recipe)
+        parsed = [] 
         for it in items:
             sid = it.get('sellable')
             s = sellables.get(sid)
@@ -555,7 +546,6 @@ class SaleViewSet(viewsets.ModelViewSet):
             parsed.append((s, qty, bool(recipe)))
 
         with db_transaction.atomic():
-            # 1) check ALL ingredients across the basket, lock rows
             shortages = []
             locked = {}
             for ing_id, need in needed.items():
@@ -572,7 +562,6 @@ class SaleViewSet(viewsets.ModelViewSet):
                     "shortages": shortages,
                 })
 
-            # 2) deduct ingredients + log transactions
             for ing_id, need in needed.items():
                 stock = locked[ing_id]
                 stock.quantity = Decimal(stock.quantity) - need
@@ -583,7 +572,6 @@ class SaleViewSet(viewsets.ModelViewSet):
                     created_by=request.user,
                 )
 
-            # 3) create the sale + line items
             total = Decimal('0')
             sale = Sale.objects.create(company=comp, warehouse=wh,
                                        note=request.data.get('note') or None,
@@ -603,7 +591,6 @@ class SaleViewSet(viewsets.ModelViewSet):
         return Response(out.data, status=status.HTTP_201_CREATED)
 
 
-# ---------------- Template (HTML page) views ----------------
 class LoginTemplateView(TemplateView):
     template_name = 'login.html'
 
