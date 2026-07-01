@@ -88,31 +88,7 @@ const api = {
     window.location.href = "/";   // back to login
   },
 
-  // Try to get a new access token using the saved refresh token.
-  // Returns true on success (and updates the stored access token), false otherwise.
-  async _refreshAccessToken() {
-    const refresh = localStorage.getItem("refresh_token");
-    if (!refresh) return false;
-    try {
-      const res = await fetch(API_BASE + "/api/token/refresh/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      if (!data.access) return false;
-      localStorage.setItem("auth_token", data.access);
-      this._token = data.access;
-      // ROTATE_REFRESH_TOKENS=True means the server may send a new refresh token
-      if (data.refresh) localStorage.setItem("refresh_token", data.refresh);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  },
-
-  async _fetch(path, opts = {}, _isRetry = false) {
+  async _fetch(path, opts = {}) {
     // Grab Django's CSRF token from the page if present
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
 
@@ -126,22 +102,7 @@ const api = {
       },
     });
 
-    // Access token expired -> try to silently refresh ONCE, then retry the request.
-    // Only if the refresh itself fails do we log the user out.
-    if (res.status === 401 && !_isRetry) {
-      const refreshed = await this._refreshAccessToken();
-      if (refreshed) {
-        return this._fetch(path, opts, true);   // retry original request with new token
-      }
-      // refresh failed -> session truly over
-      localStorage.removeItem("auth_token");
-      localStorage.removeItem("refresh_token");
-      this._token = null;
-      if (!window.location.pathname.startsWith("/login")) window.location.href = "/";
-      throw new Error("API 401: not authenticated");
-    }
-
-    // 401 on the retry too -> give up
+    // token expired or missing -> bounce to login
     if (res.status === 401) {
       localStorage.removeItem("auth_token");
       localStorage.removeItem("refresh_token");
@@ -206,11 +167,23 @@ const api = {
   transactions()        { return this._fetch("/api/transactions/"); },
   createTransaction(d)  { return this._fetch("/api/transactions/", { method: "POST", body: JSON.stringify(d) }); },
 
+  // ---- Stock orders (incoming/outgoing with status) ----
+  orders()              { return this._fetch("/api/orders/"); },
+  createOrder(d)        { return this._fetch("/api/orders/", { method: "POST", body: JSON.stringify(d) }); },
+  setOrderStatus(id, s) { return this._fetch(`/api/orders/${id}/set_status/`, { method: "POST", body: JSON.stringify({ status: s }) }); },
+
+  // ---- Sales (quick record-a-sale) ----
+  sales()               { return this._fetch("/api/sales/"); },
+  recordSale(d)         { return this._fetch("/api/sales/", { method: "POST", body: JSON.stringify(d) }); },
+  getDefaultSalesWarehouse() { return this._fetch("/api/default-sales-warehouse/"); },
+  setDefaultSalesWarehouse(id) { return this._fetch("/api/default-sales-warehouse/", { method: "POST", body: JSON.stringify({ warehouse: id }) }); },
+
   // ---- Sellable products (finished goods with a recipe) ----
   sellables()           { return this._fetch("/api/sellable-products/"); },
   createSellable(d)     { return this._fetch("/api/sellable-products/", { method: "POST", body: JSON.stringify(d) }); },
   updateSellable(id, d) { return this._fetch(`/api/sellable-products/${id}/`, { method: "PATCH", body: JSON.stringify(d) }); },
   deleteSellable(id)    { return this._fetch(`/api/sellable-products/${id}/`, { method: "DELETE" }); },
+  produceSellable(id, d){ return this._fetch(`/api/sellable-products/${id}/produce/`, { method: "POST", body: JSON.stringify(d) }); },
   updateStock(id, qty) {
     if (!USE_MOCK) return this._fetch(`${ENDPOINTS.stocks}${id}/`, { method: "PATCH", body: JSON.stringify({ quantity: qty }) });
     return _delay().then(() => {
