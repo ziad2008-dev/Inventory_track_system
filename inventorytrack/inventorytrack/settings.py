@@ -131,6 +131,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
 }
+import datetime
 
 # ---------------------------------------------------------------------------
 # JWT token lifetimes — keeps users logged in far longer than the 5-min default.
@@ -140,8 +141,8 @@ REST_FRAMEWORK = {
 # silently when the old one expires, instead of forcing a re-login.
 # ---------------------------------------------------------------------------
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=3),
+    'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=3),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': False,
 }
